@@ -1,8 +1,8 @@
-# rust-web-mcp
+# web-access-mcp
 
 **The "Ultimate Browsing Extension" for AI Coding Agents.**
 
-`rust-web-mcp` is a high-precision, ultra-lightweight Model Context Protocol (MCP) server designed to give AI agents (Claude Desktop, Cursor, etc.) direct, real-time access to the web. It is purpose-built to solve the "noise and token bloat" problem inherent in traditional web scraping.
+`web-access-mcp` is a high-precision, ultra-lightweight Model Context Protocol (MCP) server designed to give AI agents (Claude Desktop, Cursor, etc.) direct, real-time access to the web. It is purpose-built to solve the "noise and token bloat" problem inherent in traditional web scraping.
 
 ## 🚀 Key Value Propositions
 
@@ -28,7 +28,9 @@ The "Content Extractor" for deep-diving into documentation.
 *   **Output:** The core content of the page in clean Markdown.
 *   **Special Features:**
     *   **GitHub Optimization:** If the URL is `github.com`, it bypasses the browser and pulls the raw source code directly for maximum speed and clarity.
-    *   **SPA Support:** Waits for JavaScript to render (DOM stable) before extracting content.
+    *   **Readability Pipeline:** 
+        - **Extraction:** Uses `readabilityrs` to isolate the main article content (removing noise like ads, nav, and sidebars).
+        - **Conversion:** Uses `html-to-markdown-rs` to transform the clean HTML into high-fidelity Markdown.
     *   **Smart Truncation:** Safely cuts content at the last newline to prevent context overflow.
 
 ---
@@ -42,14 +44,14 @@ The "Content Extractor" for deep-diving into documentation.
 ### Building from Source
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-username/rust-web-mcp.git
-   cd rust-web-mcp
+   git clone https://github.com/your-username/web-access-mcp.git
+   cd web-access-mcp
    ```
 2. Build the project:
    ```bash
    cargo build --release
    ```
-3. The binary will be located in `target/release/rust-web-mcp`.
+3. The binary will be located in `target/release/web-access-mcp`.
 
 ### Integrating with MCP (e.g., Claude Desktop)
 Add the following to your `mcp_config.json`:
@@ -57,8 +59,8 @@ Add the following to your `mcp_config.json`:
 ```json
 {
   "mcpServers": {
-    "rust-web-mcp": {
-      "command": "/path/to/your/target/release/rust-web-mcp",
+    "web-access-mcp": {
+      "command": "/path/to/your/target/release/web-access-mcp",
       "env": {
         "CHROME_PATH": "/path/to/your/chrome" 
       }
@@ -76,7 +78,8 @@ Add the following to your `mcp_config.json`:
 *   **Async Runtime:** `tokio`
 *   **Browser Automation:** `chromiumoxide` (CDP)
 *   **Parsing:** `scraper` (CSS selectors)
-*   **Markdown:** `html2md`
+*   **Markdown:** `html-to-markdown-rs`
+*   **Extraction:** `readabilityrs`
 *   **Serialization:** `serde`
 
 ---

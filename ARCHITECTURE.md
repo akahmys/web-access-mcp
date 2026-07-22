@@ -1,7 +1,7 @@
-# Architecture: rust-web-mcp
+# Architecture: web-access-mcp
 
 ## 🎯 Mission Statement
-`rust-web-mcp` is a high-precision, token-efficient Web Search & Documentation MCP Server designed specifically for AI Coding Agents. It aims to provide "Zero-cost, Zero-API-key" access to the live web, transforming complex, noisy HTML into clean, structured Markdown.
+`web-access-mcp` is a high-precision, token-efficient Web Search & Documentation MCP Server designed specifically for AI Coding Agents. It aims to provide "Zero-cost, Zero-API-key" access to the live web, transforming complex, noisy HTML into clean, structured Markdown.
 
 ---
 
@@ -26,7 +26,7 @@
 graph TD
     AI[AI Agent / LLM] -->|JSON-RPC (stdio)| MCP[MCP Layer]
     
-    subgraph rust-web-mcp [Rust Runtime]
+    subgraph web-access-mcp [Rust Runtime]
         MCP -->|CallTool| HANDLER[Tool Handlers]
         
         subgraph STATE [Shared Thread-Safe State]
@@ -35,7 +35,8 @@ graph TD
         end
         
         subgraph ENGINE [Extraction Engine]
-            BROWSER -->|DOM Content| MD[Markdown Converter]
+            BROWSER -->|DOM Content| READ[Readability (Extraction)]
+            READ -->|Clean HTML| MD[Markdown Converter]
             BROWSER -->|Search HTML| GOOGLE[Google Parser]
             BROWSER -->|Raw Source| GITHUB[GitHub Fallback]
         end
@@ -58,7 +59,9 @@ To ensure the agent can "click" through a search result to read a page, the brow
 - **`google_search`**: Uses `scraper` to parse Google Search results into a structured list (Title, URL, Snippet).
 - **`web_fetch`**:
     - **GitHub Logic**: Detects `github.com` and switches to Raw API/Git fallback to avoid heavy rendering.
-    - **Markdown Logic**: Uses `html2md` or a `Readability`-style algorithm to strip navbars, footers, and ads, returning only the core technical content.
+    - **Readability Pipeline**:
+        1. **Extraction**: Uses `readabilityrs` to isolate the main article content (removing noise like ads, nav, and sidebars).
+        2. **Conversion**: Uses `html-to-markdown-rs` to transform the clean HTML into high-fidelity Markdown.
     - **Smart Cutter**: Enforces `max_length` to ensure the response fits within the agent's context window.
 
 ---
@@ -70,6 +73,7 @@ To ensure the agent can "click" through a search result to read a page, the brow
 | **Runtime** | `tokio` | High-performance asynchronous I/O. |
 | **Browser** | `chromiumoxide` | Reliable CDP-based control of real Chrome/Edge. |
 | **Parsing** | `scraper` | Fast and precise CSS selector-based HTML parsing. |
-| **Markdown** | `html2md` | Lightweight conversion of clean HTML to Markdown. |
+| **Markdown** | `html-to-markdown-rs` | Robust HTML-to-Markdown conversion. |
+| **Extraction** | `readabilityrs` | Noise removal (ads, nav, sidebars) via readability algorithm. |
 | **Serialization**| `serde` | Industry standard for high-speed JSON processing. |
 | **Networking** | `reqwest` | For lightweight, non-browser HTTP requests (GitHub). |

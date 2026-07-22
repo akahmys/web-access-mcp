@@ -59,12 +59,17 @@
 ---
 
 ## 🎯 Current Status
-**Current Phase:** Unifying Git repository to main branch
-**Current Objective:** Merge/switch current work onto main branch, clean up temporary working files/branches, and leave the repository unified on main.
+**Current Phase:** Release & Push (v0.1)
+**Current Objective:** Tag version v0.1 and push main branch and tags to GitHub.
 
 ---
 
 ## 🚀 Short-Term Plan
+
+*   **[✅] AWU 4.2: Tag v0.1 & Push to GitHub**
+    *   **Objective**: Create git tag `v0.1` and push `main` branch along with tags to GitHub remote.
+    *   **Scope**: Tag `v0.1`, push `main` and tags to remote repositories.
+    *   **DoD**: `main` branch and `v0.1` tag are published on GitHub.
 
 *   **[✅] AWU 4.1: Repository Unification to `main`**
     *   **Objective**: Clean up temporary files, commit pending changes, and switch/merge into `main`.

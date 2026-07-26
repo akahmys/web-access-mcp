@@ -9,7 +9,8 @@
 *   **🎯 High Precision (Markdown-First):** Automatically converts noisy HTML into clean, structured Markdown. No more wading through ads, navbars, or footers.
 *   **💎 Zero Cost:** No API keys required. No Google Search API costs. No OpenAI/Anthropic scraping costs. Uses a real browser instance to fetch what you need for free.
 *   **⚡ Token Efficiency:** Built-in "Smart Token Cutter" and GitHub-specific fallbacks ensure you never hit LLM context limits with massive, irrelevant HTML.
-*   **🛡️ Stealth & Reliability:** Uses `chromiumoxide` to maintain a persistent, shared browser session, making your searches appear like natural human browsing to bypass CAPTCHAs.
+*   **⚡ Fast Search:** `google_search`/`smart_search` resolve queries via a lightweight HTTP request (DuckDuckGo, with a Google HTML fallback) — no browser startup cost, typically ~200ms.
+*   **🛡️ Reliable Fetching:** `web_fetch` uses `chromiumoxide` to drive a persistent, shared browser session for pages that need real rendering, with a realistic User-Agent and CAPTCHA/block detection.
 *   **📦 Single Binary (Mostly):** A high-performance Rust implementation that works out of the box in any environment with a browser (Chrome/Edge/Chromium) installed.
 
 ---

@@ -6,6 +6,7 @@ use serde_json::Value;
 pub enum JsonRpcMessage {
     Request(JsonRpcRequest),
     Response(JsonRpcResponse),
+    Error(JsonRpcError),
     Notification(JsonRpcNotification),
 }
 
@@ -65,11 +66,6 @@ pub struct ServerCapabilities {
 pub struct ImplementationInfo {
     pub name: String,
     pub version: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ListToolsRequest {
-    pub tools: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

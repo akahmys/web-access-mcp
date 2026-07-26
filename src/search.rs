@@ -49,53 +49,70 @@ pub async fn perform_google_search(
         return Ok(cached);
     }
 
-    // Try fast HTTP DuckDuckGo search first
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()?;
 
+    // Try fast HTTP DuckDuckGo search first
     let ddg_url = format!("https://html.duckduckgo.com/html/?q={}", urlencoding::encode(query));
-    let res = client
-        .get(&ddg_url)
-        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-        .header("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
-        .send()
-        .await;
-
-    if let Ok(response) = res {
-        if response.status().is_success() {
-            if let Ok(html) = response.text().await {
-                let results = parse_ddg_results(&html)?;
-                if !results.is_empty() {
+    let ddg_outcome = fetch_and_parse(&client, &ddg_url, parse_ddg_results).await;
+    match ddg_outcome {
+        Ok(results) => {
+            cache.set(query.to_string(), results.clone());
+            return Ok(results);
+        }
+        Err(ddg_reason) => {
+            // Fallback to Google HTTP search
+            let google_url = format!("https://www.google.com/search?q={}", urlencoding::encode(query));
+            match fetch_and_parse(&client, &google_url, parse_search_results).await {
+                Ok(results) => {
                     cache.set(query.to_string(), results.clone());
-                    return Ok(results);
+                    Ok(results)
                 }
+                Err(google_reason) => Err(anyhow!(
+                    "Failed to retrieve search results: DuckDuckGo ({}), Google ({})",
+                    ddg_reason,
+                    google_reason
+                )),
             }
         }
     }
+}
 
-    // Fallback to Google HTTP search
-    let google_url = format!("https://www.google.com/search?q={}", urlencoding::encode(query));
-    let res = client
-        .get(&google_url)
+/// Fetches `url` and runs `parser` over the body, returning a descriptive
+/// error string (rather than swallowing it) so callers can report *why*
+/// a search backend failed: network error, non-2xx status, or a parse
+/// that produced zero results (most likely the page layout changed or we
+/// were served a block/CAPTCHA page).
+async fn fetch_and_parse(
+    client: &reqwest::Client,
+    url: &str,
+    parser: fn(&str) -> Result<Vec<SearchResult>>,
+) -> std::result::Result<Vec<SearchResult>, String> {
+    let response = client
+        .get(url)
         .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
         .header("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
         .send()
-        .await;
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
 
-    if let Ok(response) = res {
-        if response.status().is_success() {
-            if let Ok(html) = response.text().await {
-                let results = parse_search_results(&html)?;
-                if !results.is_empty() {
-                    cache.set(query.to_string(), results.clone());
-                    return Ok(results);
-                }
-            }
-        }
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("HTTP {}", status));
     }
 
-    Err(anyhow!("Failed to retrieve search results"))
+    let html = response
+        .text()
+        .await
+        .map_err(|e| format!("failed to read response body: {}", e))?;
+
+    let results = parser(&html).map_err(|e| format!("parse error: {}", e))?;
+    if results.is_empty() {
+        return Err("parsed 0 results (page layout changed or a block/CAPTCHA page was served)".to_string());
+    }
+
+    Ok(results)
 }
 
 fn parse_ddg_results(html_content: &str) -> Result<Vec<SearchResult>> {

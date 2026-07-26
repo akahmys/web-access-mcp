@@ -3,6 +3,7 @@ use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
 use chromiumoxide::page::Page;
 use std::sync::Arc;
 use std::env;
+use std::path::PathBuf;
 use tokio::sync::{RwLock, Mutex};
 use crate::error::{AppError, BrowserError};
 use futures_util::StreamExt;
@@ -11,6 +12,7 @@ use tracing::{info, warn};
 #[derive(Clone, Default)]
 pub struct BrowserState {
     browser: Arc<RwLock<Option<Arc<Mutex<Browser>>>>>,
+    user_data_dir: Arc<RwLock<Option<PathBuf>>>,
 }
 
 impl BrowserState {
@@ -39,7 +41,7 @@ impl BrowserState {
             .arg("--disable-dev-shm-usage")
             .arg("--disable-gpu")
             .arg("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-            .user_data_dir(user_data_dir);
+            .user_data_dir(&user_data_dir);
 
         if let Ok(chrome_path) = env::var("CHROME_PATH") {
             info!("Using custom CHROME_PATH: {}", chrome_path);
@@ -65,13 +67,9 @@ impl BrowserState {
 
         let browser_arc = Arc::new(Mutex::new(browser));
         *lock = Some(Arc::clone(&browser_arc));
+        *self.user_data_dir.write().await = Some(user_data_dir);
         info!("Chromium browser initialized successfully.");
         Ok(browser_arc)
-    }
-
-    pub async fn get_browser(&self) -> Option<Arc<Mutex<Browser>>> {
-        let lock = self.browser.read().await;
-        lock.as_ref().map(Arc::clone)
     }
 
     /// Creates a new browser page/tab. The browser mutex is only held for the
@@ -92,6 +90,15 @@ impl BrowserState {
         if let Some(browser_mutex_arc) = lock.take() {
             let mut browser = browser_mutex_arc.lock().await;
             browser.close().await.map_err(|e| AppError::Browser(BrowserError::Runtime(e.to_string())))?;
+        }
+        drop(lock);
+
+        // Clean up the process-isolated profile directory so it doesn't
+        // accumulate in the OS temp dir across server restarts.
+        if let Some(dir) = self.user_data_dir.write().await.take() {
+            if let Err(e) = tokio::fs::remove_dir_all(&dir).await {
+                warn!("Failed to clean up browser profile dir {:?}: {}", dir, e);
+            }
         }
         Ok(())
     }

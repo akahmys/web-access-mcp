@@ -130,7 +130,11 @@ fn get_github_raw_url(url: &str) -> Option<String> {
 }
 
 async fn fetch_raw_content(url: &str) -> Result<String> {
-    let res = reqwest::get(url).await.context("Failed to send request")?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .context("Failed to build HTTP client")?;
+    let res = client.get(url).send().await.context("Failed to send request")?;
     let text = res.text().await.context("Failed to read response text")?;
     Ok(text)
 }

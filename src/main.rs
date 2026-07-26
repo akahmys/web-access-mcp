@@ -9,8 +9,8 @@ mod smart_search;
 use tracing::{info, error};
 use error::AppResult;
 use crate::mcp::{
-    JsonRpcMessage, JsonRpcResponse, ListToolsResult, McpTool, CallToolResult, McpContent,
-    InitializeResult, ServerCapabilities, ImplementationInfo,
+    JsonRpcMessage, JsonRpcResponse, JsonRpcError, ErrorDetails, ListToolsResult, McpTool,
+    CallToolResult, McpContent, InitializeResult, ServerCapabilities, ImplementationInfo,
 };
 use crate::transport::StdioTransport;
 use crate::browser::BrowserState;
@@ -145,11 +145,24 @@ async fn handle_message(
                 }
                 _ => {
                     error!("Unknown method: {}", req.method);
+                    let response = JsonRpcError {
+                        jsonrpc: "2.0".to_string(),
+                        error: ErrorDetails {
+                            code: -32601,
+                            message: format!("Method not found: {}", req.method),
+                            data: None,
+                        },
+                        id: req.id,
+                    };
+                    transport.write_message(&JsonRpcMessage::Error(response)).await?;
                 }
             }
         }
         JsonRpcMessage::Response(res) => {
             info!("Received response: {:?}", res);
+        }
+        JsonRpcMessage::Error(err) => {
+            info!("Received error message: {:?}", err);
         }
         JsonRpcMessage::Notification(notif) => {
             info!("Received notification: {:?}", notif.method);

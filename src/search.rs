@@ -41,7 +41,7 @@ impl SearchCache {
 }
 
 pub async fn perform_google_search(
-    browser_state: &BrowserState,
+    _browser_state: &BrowserState,
     cache: &SearchCache,
     query: &str,
 ) -> Result<Vec<SearchResult>> {
@@ -49,33 +49,105 @@ pub async fn perform_google_search(
         return Ok(cached);
     }
 
-    let browser = browser_state
-        .get_browser()
-        .await
-        .ok_or_else(|| anyhow!("Browser is not running"))?;
+    // Try fast HTTP DuckDuckGo search first
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
 
-    let page = browser.lock().await.new_page(chromiumoxide::cdp::browser_protocol::target::CreateTargetParams::default()).await?;
-    let url = format!("https://www.google.com/search?q={}", urlencoding::encode(query));
-    
-    page.goto(&url).await?;
-    
-    // Wait for the search results to be present in the DOM.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    let ddg_url = format!("https://html.duckduckgo.com/html/?q={}", urlencoding::encode(query));
+    let res = client
+        .get(&ddg_url)
+        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+        .header("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
+        .send()
+        .await;
 
-    let html_content: String = page.content().await?;
-    
-    // CAPTCHA / Block Detection
-    if html_content.contains("google.com/sorry/") 
-        || html_content.contains("unusual traffic from your computer network")
-        || html_content.contains("captcha-form")
-    {
-        return Err(anyhow!("Google Search blocked by CAPTCHA/unusual traffic detection."));
+    if let Ok(response) = res {
+        if response.status().is_success() {
+            if let Ok(html) = response.text().await {
+                let results = parse_ddg_results(&html)?;
+                if !results.is_empty() {
+                    cache.set(query.to_string(), results.clone());
+                    return Ok(results);
+                }
+            }
+        }
     }
 
-    let results = parse_search_results(&html_content)?;
+    // Fallback to Google HTTP search
+    let google_url = format!("https://www.google.com/search?q={}", urlencoding::encode(query));
+    let res = client
+        .get(&google_url)
+        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+        .header("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
+        .send()
+        .await;
 
-    if !results.is_empty() {
-        cache.set(query.to_string(), results.clone());
+    if let Ok(response) = res {
+        if response.status().is_success() {
+            if let Ok(html) = response.text().await {
+                let results = parse_search_results(&html)?;
+                if !results.is_empty() {
+                    cache.set(query.to_string(), results.clone());
+                    return Ok(results);
+                }
+            }
+        }
+    }
+
+    Err(anyhow!("Failed to retrieve search results"))
+}
+
+fn parse_ddg_results(html_content: &str) -> Result<Vec<SearchResult>> {
+    let document = Html::parse_document(html_content);
+    let mut results = Vec::new();
+
+    let result_selector = Selector::parse(".result").map_err(|e| anyhow!("Selector error: {}", e))?;
+    let title_selector = Selector::parse(".result__a, .result__title").map_err(|e| anyhow!("Selector error: {}", e))?;
+    let link_selector = Selector::parse("a.result__a, a.result__url").map_err(|e| anyhow!("Selector error: {}", e))?;
+    let snippet_selector = Selector::parse(".result__snippet").map_err(|e| anyhow!("Selector error: {}", e))?;
+
+    for element in document.select(&result_selector) {
+        let title = element
+            .select(&title_selector)
+            .next()
+            .map(|el| el.text().collect::<Vec<_>>().join("").trim().to_string())
+            .unwrap_or_default();
+
+        let link = element
+            .select(&link_selector)
+            .next()
+            .and_then(|el| el.value().attr("href").map(|s| s.to_string()))
+            .unwrap_or_default();
+
+        // Extract actual URL if wrapped in DDG redirect (/l/?uddg=...)
+        let actual_link = if link.contains("uddg=") {
+            link.split("uddg=")
+                .nth(1)
+                .and_then(|s| s.split('&').next())
+                .and_then(|s| urlencoding::decode(s).ok().map(|c| c.into_owned()))
+                .unwrap_or(link)
+        } else {
+            link
+        };
+
+        let snippet = element
+            .select(&snippet_selector)
+            .next()
+            .map(|el| el.text().collect::<Vec<_>>().join("").trim().to_string())
+            .unwrap_or_default();
+
+        if !title.is_empty() && actual_link.starts_with("http") {
+            results.push(SearchResult {
+                title,
+                url: actual_link,
+                snippet,
+            });
+        }
+
+        if results.len() >= 5 {
+            break;
+        }
     }
 
     Ok(results)

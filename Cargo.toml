@@ -7,7 +7,7 @@ description = "A high-precision MCP agent for web automation and searching"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-chromiumoxide = "0.5"
+chromiumoxide = "0.9"
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -48,6 +48,26 @@ pub struct ErrorDetails {
 // MCP specific models
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InitializeResult {
+    #[serde(rename = "protocolVersion")]
+    pub protocol_version: String,
+    pub capabilities: ServerCapabilities,
+    #[serde(rename = "serverInfo")]
+    pub server_info: ImplementationInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerCapabilities {
+    pub tools: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImplementationInfo {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListToolsRequest {
     pub tools: Option<Value>,
 }
@@ -61,18 +81,21 @@ pub struct ListToolsResult {
 pub struct McpTool {
     pub name: String,
     pub description: String,
+    #[serde(rename = "inputSchema", alias = "input_schema")]
     pub input_schema: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallToolRequest {
     pub name: String,
+    #[serde(default)]
     pub arguments: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallToolResult {
     pub content: Vec<McpContent>,
+    #[serde(rename = "isError", alias = "is_error", skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
 }
 

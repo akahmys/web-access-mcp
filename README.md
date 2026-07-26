@@ -16,6 +16,11 @@
 
 ## 🛠️ Available Tools
 
+### `smart_search` (Recommended)
+One-stop web research tool that performs search and concurrently fetches extracted Markdown content from top result pages in a single call.
+*   **Input:** `query` (string, required), `max_pages` (integer, optional, default 3, max 5)
+*   **Output:** Aggregated JSON with search snippets and full extracted Markdown content for top result pages.
+
 ### `google_search`
 Perform web searches without an API key.
 *   **Input:** `query` (string)

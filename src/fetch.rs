@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
-use chromiumoxide::browser::Browser;
 use chromiumoxide::page::Page;
+use crate::browser::BrowserState;
 use readabilityrs::Readability;
 use html_to_markdown_rs::convert;
 use serde::Serialize;
@@ -14,7 +14,7 @@ pub struct WebFetchResult {
     pub content: String,
 }
 
-pub async fn fetch_url(browser: &Browser, url: &str) -> Result<WebFetchResult> {
+pub async fn fetch_url(browser_state: &BrowserState, url: &str) -> Result<WebFetchResult> {
     // 1. Check for GitHub Raw content first to bypass browser automation
     if let Some(raw_url) = get_github_raw_url(url) {
         match fetch_raw_content(&raw_url).await {
@@ -30,11 +30,14 @@ pub async fn fetch_url(browser: &Browser, url: &str) -> Result<WebFetchResult> {
         }
     }
 
-    // 2. Fallback to Chromium-based browser
-    let page = browser
-        .new_page(chromiumoxide::cdp::browser_protocol::target::CreateTargetParams::default())
+    // 2. Fallback to Chromium-based browser. Only the page-creation call is
+    // made under the shared browser lock; navigation/extraction below runs
+    // against this page's own CDP session, so concurrent fetches don't
+    // serialize on each other.
+    let page = browser_state
+        .new_page()
         .await
-        .context("Failed to create new page")?;
+        .map_err(|e| anyhow!("Failed to create new page: {}", e))?;
 
     // Wrap page navigation and waiting in a timeout
     let page_load_timeout = Duration::from_secs(15);
@@ -154,7 +157,7 @@ fn html_to_markdown(html_content: &str) -> Result<String> {
     Ok(markdown.trim().to_string())
 }
 
-fn truncate_content(content: &str, max_len: usize) -> String {
+pub fn truncate_content(content: &str, max_len: usize) -> String {
     if content.len() <= max_len {
         return content.to_string();
     }

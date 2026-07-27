@@ -20,24 +20,30 @@
 ### `smart_search` (Recommended)
 One-stop web research tool that performs search and concurrently fetches extracted Markdown content from top result pages in a single call.
 *   **Input:** `query` (string, required), `max_pages` (integer, optional, default 3, max 5)
-*   **Output:** Aggregated JSON with search snippets and full extracted Markdown content for top result pages.
+*   **Output:** Aggregated JSON with search snippets and full extracted Markdown content for top result pages. If content couldn't be fetched for a given result, `content` is omitted and an `error` field explains why (e.g. blocked, timed out) with a hint for what to try next.
 
 ### `google_search`
 Perform web searches without an API key.
 *   **Input:** `query` (string)
-*   **Output:** A structured list of the top 5 search results (Title, URL, and Snippet) in JSON format.
+*   **Output:** A structured list of search results (Title, URL, and Snippet) in JSON format. Capped at 5 results on the primary DuckDuckGo path; the Google HTML fallback (used only if DuckDuckGo fails) is uncapped and may return more.
 *   **Optimization:** Uses an in-memory cache to prevent redundant requests and avoid being flagged.
 
 ### `web_fetch`
 The "Content Extractor" for deep-diving into documentation.
-*   **Input:** `url` (string, required), `max_length` (integer, optional, default 8000)
-*   **Output:** The core content of the page in clean Markdown.
+*   **Input:** `url` (string, required)
+*   **Output:** The core content of the page in clean Markdown, automatically truncated to ~10,000 characters at the nearest line boundary to protect context windows.
 *   **Special Features:**
-    *   **GitHub Optimization:** If the URL is `github.com`, it bypasses the browser and pulls the raw source code directly for maximum speed and clarity.
+    *   **GitHub Optimization:** If the URL is a GitHub file/blob URL (contains `github.com` and `/blob/`), it bypasses the browser and pulls the raw source code directly for maximum speed and clarity. Other `github.com` pages (repo home, issues, PRs, etc.) go through the normal browser fetch path.
     *   **Readability Pipeline:** 
         - **Extraction:** Uses `readabilityrs` to isolate the main article content (removing noise like ads, nav, and sidebars).
         - **Conversion:** Uses `html-to-markdown-rs` to transform the clean HTML into high-fidelity Markdown.
     *   **Smart Truncation:** Safely cuts content at the last newline to prevent context overflow.
+
+---
+
+## ⚠️ Error Handling
+
+When a tool call fails (bad URL, timeout, CAPTCHA block, missing argument, etc.), the response is a normal MCP tool error (`isError: true`) containing a descriptive message plus a `Hint:` clause telling the calling agent what to try next (e.g. retry once, try a different URL, use `google_search` to find an alternative source). A single failed call never crashes the server or the rest of the session.
 
 ---
 
@@ -50,7 +56,7 @@ The "Content Extractor" for deep-diving into documentation.
 ### Building from Source
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-username/web-access-mcp.git
+   git clone https://github.com/akahmys/web-access-mcp.git
    cd web-access-mcp
    ```
 2. Build the project:
@@ -87,6 +93,8 @@ Add the following to your `mcp_config.json`:
 *   **Markdown:** `html-to-markdown-rs`
 *   **Extraction:** `readabilityrs`
 *   **Serialization:** `serde`
+*   **Error Handling:** `thiserror` (typed domain errors carrying agent-facing hints) + `anyhow` (top-level propagation)
+*   **Networking:** `reqwest` (search HTTP requests, GitHub raw fetch)
 
 ---
 

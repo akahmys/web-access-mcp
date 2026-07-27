@@ -1,6 +1,5 @@
 use crate::mcp::JsonRpcMessage;
 use anyhow::{Context, Result};
-use serde_json;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::io::{stdin, stdout};
 

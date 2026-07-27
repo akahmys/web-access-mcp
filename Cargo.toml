@@ -2,8 +2,9 @@
 name = "web-access-mcp"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name"]
+authors = ["akahmys"]
 description = "A high-precision MCP agent for web automation and searching"
+license = "MIT"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -13,12 +14,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-mcp-core = "0.1"
 thiserror = "1.0"
 futures-util = "0.3"
-html5ever = "0.26"
-encoding_rs = "0.8"
-ego-tree = "0.6"
 dashmap = "5.5"
 urlencoding = "2.1"
 scraper = "0.18"

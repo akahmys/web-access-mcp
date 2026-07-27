@@ -1,15 +1,31 @@
 use crate::browser::BrowserState;
-use anyhow::{anyhow, Result};
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 use dashmap::DashMap;
 use std::time::{Duration, Instant};
 use serde::Serialize;
+use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchResult {
     pub title: String,
     pub url: String,
     pub snippet: String,
+}
+
+/// Domain errors for `google_search`/`smart_search`. As in `FetchError`,
+/// every variant carries an already-formatted message (no `#[source]`) so
+/// propagating this through `?` into `anyhow::Result` and later printing it
+/// with `{:#}` at the MCP boundary doesn't repeat the underlying cause.
+#[derive(Debug, Error)]
+pub enum SearchError {
+    #[error("Failed to build HTTP client: {0}")]
+    ClientBuild(String),
+
+    #[error("Selector error: {0}")]
+    Selector(String),
+
+    #[error("Failed to retrieve search results: DuckDuckGo ({ddg}), Google ({google}). Hint: both search backends failed (likely rate-limited, network issue, or a block/CAPTCHA page) -- wait a moment and retry, try rephrasing the query, or use web_fetch directly if you already know a candidate URL.")]
+    BothBackendsFailed { ddg: String, google: String },
 }
 
 pub struct SearchCache {
@@ -44,37 +60,32 @@ pub async fn perform_google_search(
     _browser_state: &BrowserState,
     cache: &SearchCache,
     query: &str,
-) -> Result<Vec<SearchResult>> {
+) -> Result<Vec<SearchResult>, SearchError> {
     if let Some(cached) = cache.get(query) {
         return Ok(cached);
     }
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
-        .build()?;
+        .build()
+        .map_err(|e| SearchError::ClientBuild(e.to_string()))?;
 
-    // Try fast HTTP DuckDuckGo search first
+    let results = search_with_fallback(&client, query).await?;
+    cache.set(query.to_string(), results.clone());
+    Ok(results)
+}
+
+/// Tries `DuckDuckGo`'s HTML search first (fast, rarely blocked); falls back
+/// to a Google HTML search if `DuckDuckGo` fails or returns zero results.
+async fn search_with_fallback(client: &reqwest::Client, query: &str) -> Result<Vec<SearchResult>, SearchError> {
     let ddg_url = format!("https://html.duckduckgo.com/html/?q={}", urlencoding::encode(query));
-    let ddg_outcome = fetch_and_parse(&client, &ddg_url, parse_ddg_results).await;
-    match ddg_outcome {
-        Ok(results) => {
-            cache.set(query.to_string(), results.clone());
-            return Ok(results);
-        }
+    match fetch_and_parse(client, &ddg_url, parse_ddg_results).await {
+        Ok(results) => Ok(results),
         Err(ddg_reason) => {
-            // Fallback to Google HTTP search
             let google_url = format!("https://www.google.com/search?q={}", urlencoding::encode(query));
-            match fetch_and_parse(&client, &google_url, parse_search_results).await {
-                Ok(results) => {
-                    cache.set(query.to_string(), results.clone());
-                    Ok(results)
-                }
-                Err(google_reason) => Err(anyhow!(
-                    "Failed to retrieve search results: DuckDuckGo ({}), Google ({})",
-                    ddg_reason,
-                    google_reason
-                )),
-            }
+            fetch_and_parse(client, &google_url, parse_search_results)
+                .await
+                .map_err(|google_reason| SearchError::BothBackendsFailed { ddg: ddg_reason, google: google_reason })
         }
     }
 }
@@ -87,27 +98,27 @@ pub async fn perform_google_search(
 async fn fetch_and_parse(
     client: &reqwest::Client,
     url: &str,
-    parser: fn(&str) -> Result<Vec<SearchResult>>,
-) -> std::result::Result<Vec<SearchResult>, String> {
+    parser: fn(&str) -> Result<Vec<SearchResult>, SearchError>,
+) -> Result<Vec<SearchResult>, String> {
     let response = client
         .get(url)
         .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
         .header("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
         .send()
         .await
-        .map_err(|e| format!("request failed: {}", e))?;
+        .map_err(|e| format!("request failed: {e}"))?;
 
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("HTTP {}", status));
+        return Err(format!("HTTP {status}"));
     }
 
     let html = response
         .text()
         .await
-        .map_err(|e| format!("failed to read response body: {}", e))?;
+        .map_err(|e| format!("failed to read response body: {e}"))?;
 
-    let results = parser(&html).map_err(|e| format!("parse error: {}", e))?;
+    let results = parser(&html).map_err(|e| format!("parse error: {e}"))?;
     if results.is_empty() {
         return Err("parsed 0 results (page layout changed or a block/CAPTCHA page was served)".to_string());
     }
@@ -115,53 +126,20 @@ async fn fetch_and_parse(
     Ok(results)
 }
 
-fn parse_ddg_results(html_content: &str) -> Result<Vec<SearchResult>> {
+fn parse_ddg_results(html_content: &str) -> Result<Vec<SearchResult>, SearchError> {
     let document = Html::parse_document(html_content);
+    let result_selector = Selector::parse(".result").map_err(|e| SearchError::Selector(e.to_string()))?;
+    let title_selector = Selector::parse(".result__a, .result__title").map_err(|e| SearchError::Selector(e.to_string()))?;
+    let link_selector = Selector::parse("a.result__a, a.result__url").map_err(|e| SearchError::Selector(e.to_string()))?;
+    let snippet_selector = Selector::parse(".result__snippet").map_err(|e| SearchError::Selector(e.to_string()))?;
+
     let mut results = Vec::new();
-
-    let result_selector = Selector::parse(".result").map_err(|e| anyhow!("Selector error: {}", e))?;
-    let title_selector = Selector::parse(".result__a, .result__title").map_err(|e| anyhow!("Selector error: {}", e))?;
-    let link_selector = Selector::parse("a.result__a, a.result__url").map_err(|e| anyhow!("Selector error: {}", e))?;
-    let snippet_selector = Selector::parse(".result__snippet").map_err(|e| anyhow!("Selector error: {}", e))?;
-
     for element in document.select(&result_selector) {
-        let title = element
-            .select(&title_selector)
-            .next()
-            .map(|el| el.text().collect::<Vec<_>>().join("").trim().to_string())
-            .unwrap_or_default();
-
-        let link = element
-            .select(&link_selector)
-            .next()
-            .and_then(|el| el.value().attr("href").map(|s| s.to_string()))
-            .unwrap_or_default();
-
-        // Extract actual URL if wrapped in DDG redirect (/l/?uddg=...)
-        let actual_link = if link.contains("uddg=") {
-            link.split("uddg=")
-                .nth(1)
-                .and_then(|s| s.split('&').next())
-                .and_then(|s| urlencoding::decode(s).ok().map(|c| c.into_owned()))
-                .unwrap_or(link)
-        } else {
-            link
+        let Some(result) = extract_ddg_result(&element, &title_selector, &link_selector, &snippet_selector) else {
+            continue;
         };
 
-        let snippet = element
-            .select(&snippet_selector)
-            .next()
-            .map(|el| el.text().collect::<Vec<_>>().join("").trim().to_string())
-            .unwrap_or_default();
-
-        if !title.is_empty() && actual_link.starts_with("http") {
-            results.push(SearchResult {
-                title,
-                url: actual_link,
-                snippet,
-            });
-        }
-
+        results.push(result);
         if results.len() >= 5 {
             break;
         }
@@ -170,26 +148,70 @@ fn parse_ddg_results(html_content: &str) -> Result<Vec<SearchResult>> {
     Ok(results)
 }
 
-fn parse_search_results(html_content: &str) -> Result<Vec<SearchResult>> {
+fn extract_ddg_result(
+    element: &ElementRef,
+    title_selector: &Selector,
+    link_selector: &Selector,
+    snippet_selector: &Selector,
+) -> Option<SearchResult> {
+    let title = element
+        .select(title_selector)
+        .next()
+        .map(|el| el.text().collect::<Vec<_>>().join("").trim().to_string())
+        .unwrap_or_default();
+
+    let link = element
+        .select(link_selector)
+        .next()
+        .and_then(|el| el.value().attr("href").map(std::string::ToString::to_string))
+        .unwrap_or_default();
+
+    let actual_link = resolve_ddg_redirect(link);
+
+    let snippet = element
+        .select(snippet_selector)
+        .next()
+        .map(|el| el.text().collect::<Vec<_>>().join("").trim().to_string())
+        .unwrap_or_default();
+
+    if title.is_empty() || !actual_link.starts_with("http") {
+        return None;
+    }
+
+    Some(SearchResult { title, url: actual_link, snippet })
+}
+
+/// `DuckDuckGo`'s HTML search wraps result links in a `/l/?uddg=...`
+/// redirect; unwrap it to the real destination URL when present.
+fn resolve_ddg_redirect(link: String) -> String {
+    if !link.contains("uddg=") {
+        return link;
+    }
+    link.split("uddg=")
+        .nth(1)
+        .and_then(|s| s.split('&').next())
+        .and_then(|s| urlencoding::decode(s).ok().map(std::borrow::Cow::into_owned))
+        .unwrap_or(link)
+}
+
+fn parse_search_results(html_content: &str) -> Result<Vec<SearchResult>, SearchError> {
     let document = Html::parse_document(html_content);
     let mut results = Vec::new();
 
-    let result_selector = Selector::parse("div.g").map_err(|e| anyhow!("Selector error: {}", e))?;
-    let title_selector = Selector::parse("h3").map_err(|e| anyhow!("Selector error: {}", e))?;
-    let link_selector = Selector::parse("a").map_err(|e| anyhow!("Selector error: {}", e))?;
-    let snippet_selector = Selector::parse(".VwiAwd, .ST93db, .kb139e").map_err(|e| anyhow!("Selector error: {}", e))?;
+    let result_selector = Selector::parse("div.g").map_err(|e| SearchError::Selector(e.to_string()))?;
+    let title_selector = Selector::parse("h3").map_err(|e| SearchError::Selector(e.to_string()))?;
+    let link_selector = Selector::parse("a").map_err(|e| SearchError::Selector(e.to_string()))?;
+    let snippet_selector = Selector::parse(".VwiAwd, .ST93db, .kb139e").map_err(|e| SearchError::Selector(e.to_string()))?;
 
     for element in document.select(&result_selector) {
         let title = element
             .select(&title_selector)
-            .next()
-            .map(|el| el.text().collect::<Vec<_>>().join(""))
-            .unwrap_or_else(|| "No Title".to_string());
+            .next().map_or_else(|| "No Title".to_string(), |el| el.text().collect::<Vec<_>>().join(""));
 
         let link = element
             .select(&link_selector)
             .next()
-            .and_then(|el| el.value().attr("href").map(|s| s.to_string()))
+            .and_then(|el| el.value().attr("href").map(std::string::ToString::to_string))
             .unwrap_or_else(|| "No Link".to_string());
 
         let snippet = element
@@ -211,38 +233,4 @@ fn parse_search_results(html_content: &str) -> Result<Vec<SearchResult>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_search_cache_ttl() {
-        let cache = SearchCache::new(Duration::from_millis(50));
-        let results = vec![SearchResult {
-            title: "Test".to_string(),
-            url: "https://example.com".to_string(),
-            snippet: "Snippet".to_string(),
-        }];
-
-        cache.set("query".to_string(), results.clone());
-        assert!(cache.get("query").is_some());
-
-        // Wait for TTL expiration
-        std::thread::sleep(Duration::from_millis(60));
-        assert!(cache.get("query").is_none());
-    }
-
-    #[test]
-    fn test_parse_search_results() {
-        let html = r#"
-            <div class="g">
-                <h3><a href="https://example.com">Example Title</a></h3>
-                <div class="VwiAwd">Example snippet text.</div>
-            </div>
-        "#;
-        let results = parse_search_results(html).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].title, "Example Title");
-        assert_eq!(results[0].url, "https://example.com");
-        assert_eq!(results[0].snippet, "Example snippet text.");
-    }
-}
+mod tests;

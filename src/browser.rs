@@ -50,7 +50,7 @@ impl BrowserState {
 
         let config = builder
             .build()
-            .map_err(|e| BrowserError::Launch(e.to_string()))?;
+            .map_err(|e| BrowserError::Launch(e.clone()))?;
 
         let (browser, mut handler) = Browser::launch(config)
             .await

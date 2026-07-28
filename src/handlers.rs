@@ -3,7 +3,7 @@ use tracing::{error, info};
 
 use crate::browser::BrowserState;
 use crate::error::AppResult;
-use crate::fetch::fetch_url;
+use crate::fetch::{fetch_url, FetchCache};
 use crate::mcp::{CallToolResult, ListToolsResult, McpContent, McpTool};
 use crate::search::{perform_web_search, SearchCache};
 use crate::smart_search::perform_smart_search;
@@ -52,15 +52,16 @@ pub async fn list_tools_handler() -> AppResult<ListToolsResult> {
 pub async fn call_tool_handler(
     browser_state: &BrowserState,
     search_cache: &SearchCache,
+    fetch_cache: &FetchCache,
     name: &str,
     arguments: &Value,
 ) -> AppResult<CallToolResult> {
     info!("Calling tool: {} with arguments: {:?}", name, arguments);
 
     match name {
-        "smart_search" => call_smart_search(browser_state, search_cache, arguments).await,
+        "smart_search" => call_smart_search(browser_state, search_cache, fetch_cache, arguments).await,
         "web_search" => call_web_search(browser_state, search_cache, arguments).await,
-        "web_fetch" => call_web_fetch(browser_state, arguments).await,
+        "web_fetch" => call_web_fetch(browser_state, fetch_cache, arguments).await,
         _ => {
             error!("Unknown tool: {}", name);
             Err(anyhow::anyhow!(
@@ -84,6 +85,7 @@ fn text_result(text: String) -> CallToolResult {
 async fn call_smart_search(
     browser_state: &BrowserState,
     search_cache: &SearchCache,
+    fetch_cache: &FetchCache,
     arguments: &Value,
 ) -> AppResult<CallToolResult> {
     let query = arguments
@@ -100,7 +102,7 @@ async fn call_smart_search(
         .unwrap_or(3)
         .min(5);
 
-    let results = perform_smart_search(browser_state, search_cache, query, max_pages).await?;
+    let results = perform_smart_search(browser_state, search_cache, fetch_cache, query, max_pages).await?;
     Ok(text_result(serde_json::to_string_pretty(&results)?))
 }
 
@@ -120,7 +122,7 @@ async fn call_web_search(
     Ok(text_result(serde_json::to_string(&results)?))
 }
 
-async fn call_web_fetch(browser_state: &BrowserState, arguments: &Value) -> AppResult<CallToolResult> {
+async fn call_web_fetch(browser_state: &BrowserState, fetch_cache: &FetchCache, arguments: &Value) -> AppResult<CallToolResult> {
     let url = arguments
         .get("url")
         .and_then(|v| v.as_str())
@@ -128,6 +130,6 @@ async fn call_web_fetch(browser_state: &BrowserState, arguments: &Value) -> AppR
             "Missing 'url' argument in web_fetch. Hint: pass an absolute URL including the scheme, e.g. 'https://example.com/page'."
         ))?;
 
-    let result = fetch_url(browser_state, url).await?;
+    let result = fetch_url(browser_state, fetch_cache, url).await?;
     Ok(text_result(serde_json::to_string(&result)?))
 }

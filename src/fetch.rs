@@ -1,6 +1,7 @@
 use anyhow::Context;
 use chromiumoxide::page::Page;
 use crate::browser::BrowserState;
+use crate::cache::TtlCache;
 use readabilityrs::Readability;
 use html_to_markdown_rs::convert;
 use serde::Serialize;
@@ -14,6 +15,8 @@ mod ssrf;
 use ssrf::validate_public_url;
 
 const MAX_CONTENT_LENGTH: usize = 10000;
+
+pub type FetchCache = TtlCache<WebFetchResult>;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WebFetchResult {
@@ -71,7 +74,20 @@ pub enum FetchError {
     SsrfBlocked(String),
 }
 
-pub async fn fetch_url(browser_state: &BrowserState, url: &str) -> Result<WebFetchResult, FetchError> {
+/// Fetches and extracts `url`, serving a cached result if one was fetched
+/// within the last `FetchCache` TTL. Pages change more often than search
+/// rankings, so this TTL is much shorter than `SearchCache`'s.
+pub async fn fetch_url(browser_state: &BrowserState, fetch_cache: &FetchCache, url: &str) -> Result<WebFetchResult, FetchError> {
+    if let Some(cached) = fetch_cache.get(url) {
+        return Ok(cached);
+    }
+
+    let result = fetch_url_uncached(browser_state, url).await?;
+    fetch_cache.set(url.to_string(), result.clone());
+    Ok(result)
+}
+
+async fn fetch_url_uncached(browser_state: &BrowserState, url: &str) -> Result<WebFetchResult, FetchError> {
     // 0. Reject URLs that resolve to loopback/private/link-local/metadata
     // addresses before making any request against them, closing off
     // web_fetch as an SSRF vector into the host's internal network.

@@ -40,6 +40,7 @@ The "Content Extractor" for deep-diving into documentation.
         - **Extraction:** Uses `readabilityrs` to isolate the main article content (removing noise like ads, nav, and sidebars).
         - **Conversion:** Uses `html-to-markdown-rs` to transform the clean HTML into high-fidelity Markdown.
     *   **Smart Truncation:** Safely cuts content at the last newline to prevent context overflow.
+    *   **Caching:** Results are cached per-URL for 10 minutes, so re-fetching a URL an agent already visited (including via `smart_search`) skips the browser entirely.
 
 ---
 

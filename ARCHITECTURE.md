@@ -58,7 +58,7 @@ Handles the lifecycle of the MCP server, listening on `stdin` and communicating 
 ### 2. Shared State Management (`BrowserState`)
 To ensure the agent can fetch multiple pages within the same session, the browser is not launched per-request but lazily on first `web_fetch`/`smart_search` call, then shared for the lifetime of the server process.
 - **`BrowserState` (`Arc<RwLock<Option<Arc<Mutex<Browser>>>>>`)**: Lazily starts one shared `chromiumoxide` browser instance; the lock is only held briefly to open a new page, so concurrent fetches run in parallel rather than serializing on page load.
-- **`SearchCache`**: A `DashMap`-backed in-memory cache with TTL (1 hour) to prevent redundant search requests and minimize latency.
+- **`TtlCache<V>`** (`src/cache.rs`): A generic `DashMap`-backed in-memory cache with a fixed TTL per entry, shared by two instantiations -- `SearchCache` (`TtlCache<Vec<SearchResult>>`, 1 hour TTL, keyed by query) and `FetchCache` (`TtlCache<WebFetchResult>`, 10 minute TTL, keyed by URL). The shorter fetch TTL reflects that page content changes more often than search rankings. `fetch_url` checks/populates the cache before any GitHub/PDF/browser dispatch, so a repeat fetch of the same URL (including from `smart_search`'s per-item fetches) skips the browser entirely.
 
 ### 3. Extraction & Transformation Engine
 - **`web_search`**: Does *not* use the browser. Issues a plain `reqwest` HTTP GET against Bing's `format=rss` search feed -- a documented, purpose-built machine-readable output mode, not HTML/CSS-selector scraping -- and parses the response as structured XML with `quick-xml` into a list (Title, URL, Snippet), typically ~10 results per query.

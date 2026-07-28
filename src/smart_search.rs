@@ -1,5 +1,5 @@
 use crate::browser::BrowserState;
-use crate::fetch::{fetch_url, truncate_content};
+use crate::fetch::{fetch_url, truncate_content, FetchCache};
 use crate::search::{perform_web_search, SearchCache, SearchResult};
 use anyhow::Result;
 use futures_util::future::join_all;
@@ -27,6 +27,7 @@ pub struct SmartSearchResult {
 pub async fn perform_smart_search(
     browser_state: &BrowserState,
     search_cache: &SearchCache,
+    fetch_cache: &FetchCache,
     query: &str,
     max_pages: usize,
 ) -> Result<SmartSearchResult> {
@@ -43,7 +44,7 @@ pub async fn perform_smart_search(
     // page load.
     let fetch_futures = target_items
         .into_iter()
-        .map(|item| fetch_one_item(browser_state.clone(), item));
+        .map(|item| fetch_one_item(browser_state.clone(), fetch_cache, item));
 
     let items = join_all(fetch_futures).await;
     let fetched_pages = items.iter().filter(|i| i.content.is_some()).count();
@@ -60,10 +61,10 @@ pub async fn perform_smart_search(
 /// propagate to the caller -- the item just carries an `error` explanation
 /// with a hint instead of `content`, so one bad page doesn't fail the
 /// whole `smart_search` call.
-async fn fetch_one_item(browser_state: BrowserState, item: SearchResult) -> SmartSearchItem {
+async fn fetch_one_item(browser_state: BrowserState, fetch_cache: &FetchCache, item: SearchResult) -> SmartSearchItem {
     let SearchResult { title, url, snippet } = item;
 
-    let (content, error) = match fetch_url(&browser_state, &url).await {
+    let (content, error) = match fetch_url(&browser_state, fetch_cache, &url).await {
         Ok(res) => (Some(truncate_content(&res.content, 2500)), None),
         Err(e) => {
             // FetchError's message already contains its own hint, so it's

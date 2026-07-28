@@ -8,6 +8,7 @@ mod browser;
 mod search;
 mod smart_search;
 mod handlers;
+mod cache;
 
 use tracing::{info, error};
 use error::AppResult;
@@ -22,6 +23,7 @@ use crate::handlers::{call_tool_handler, list_tools_handler};
 use serde_json::{json, Value};
 use std::time::Duration;
 use crate::search::SearchCache;
+use crate::fetch::FetchCache;
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
@@ -47,9 +49,10 @@ async fn run() -> AppResult<()> {
     let mut transport = StdioTransport::new();
     let browser_state = BrowserState::new();
     let search_cache = SearchCache::new(Duration::from_hours(1));
+    let fetch_cache = FetchCache::new(Duration::from_mins(10));
 
     while let Some(message) = transport.read_message().await? {
-        if let Err(e) = handle_message(&mut transport, &browser_state, &search_cache, message).await {
+        if let Err(e) = handle_message(&mut transport, &browser_state, &search_cache, &fetch_cache, message).await {
             error!("Error handling message: {:?}", e);
             break;
         }
@@ -67,6 +70,7 @@ async fn handle_message(
     transport: &mut StdioTransport,
     browser_state: &BrowserState,
     search_cache: &SearchCache,
+    fetch_cache: &FetchCache,
     message: JsonRpcMessage,
 ) -> AppResult<()> {
     let req = match message {
@@ -89,7 +93,7 @@ async fn handle_message(
         "initialize" => handle_initialize(transport, req.id).await,
         "ping" => handle_ping(transport, req.id).await,
         "tools/list" | "list_tools" => handle_tools_list(transport, req.id).await,
-        "tools/call" | "call_tool" => handle_tools_call(transport, browser_state, search_cache, req).await,
+        "tools/call" | "call_tool" => handle_tools_call(transport, browser_state, search_cache, fetch_cache, req).await,
         _ => handle_unknown_method(transport, &req.method, req.id).await,
     }
 }
@@ -137,12 +141,13 @@ async fn handle_tools_call(
     transport: &mut StdioTransport,
     browser_state: &BrowserState,
     search_cache: &SearchCache,
+    fetch_cache: &FetchCache,
     req: JsonRpcRequest,
 ) -> AppResult<()> {
     let call_result: AppResult<CallToolResult> = match &req.params {
         Some(params) => match serde_json::from_value::<CallToolRequest>(params.clone()) {
             Ok(call_req) => {
-                call_tool_handler(browser_state, search_cache, &call_req.name, &call_req.arguments).await
+                call_tool_handler(browser_state, search_cache, fetch_cache, &call_req.name, &call_req.arguments).await
             }
             Err(e) => Err(anyhow::anyhow!(
                 "Invalid CallToolRequest: {e}. Hint: 'arguments' must be a JSON object matching the target tool's inputSchema (see tools/list) -- check for missing fields or wrong types."

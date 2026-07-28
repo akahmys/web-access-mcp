@@ -1,9 +1,11 @@
 use crate::browser::BrowserState;
-use dashmap::DashMap;
+use crate::cache::TtlCache;
 use serde::Deserialize;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use serde::Serialize;
 use thiserror::Error;
+
+pub type SearchCache = TtlCache<Vec<SearchResult>>;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchResult {
@@ -23,34 +25,6 @@ pub enum SearchError {
 
     #[error("Failed to retrieve search results from Bing: {0}. Hint: this may be a transient network/rate-limit issue -- wait a moment and retry, rephrase the query, or use web_fetch directly if you already know a candidate URL.")]
     RequestFailed(String),
-}
-
-pub struct SearchCache {
-    cache: DashMap<String, (Vec<SearchResult>, Instant)>,
-    ttl: Duration,
-}
-
-impl SearchCache {
-    pub fn new(ttl: Duration) -> Self {
-        Self {
-            cache: DashMap::new(),
-            ttl,
-        }
-    }
-
-    pub fn get(&self, query: &str) -> Option<Vec<SearchResult>> {
-        if let Some(entry) = self.cache.get(query) {
-            let (results, expires_at) = entry.value();
-            if *expires_at > Instant::now() {
-                return Some(results.clone());
-            }
-        }
-        None
-    }
-
-    pub fn set(&self, query: String, results: Vec<SearchResult>) {
-        self.cache.insert(query, (results, Instant::now() + self.ttl));
-    }
 }
 
 /// Bing's RSS search feed. `format=rss` is a documented Bing output mode

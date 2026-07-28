@@ -11,11 +11,18 @@ use thiserror::Error;
 mod pdf;
 use pdf::try_fetch_pdf;
 
+mod fast_path;
+use fast_path::try_fast_path;
+
 mod ssrf;
 use ssrf::validate_public_url;
 
 mod multi;
 pub use multi::fetch_content_or_error;
+
+mod actions;
+pub use actions::PageAction;
+use actions::run_actions;
 
 const MAX_CONTENT_LENGTH: usize = 10000;
 
@@ -75,51 +82,56 @@ pub enum FetchError {
 
     #[error("Blocked for security: {0}. Hint: web_fetch refuses to access private/internal network addresses (localhost, RFC1918 ranges, link-local, cloud metadata endpoints) -- this isn't a transient failure, don't retry; use a public URL instead.")]
     SsrfBlocked(String),
+
+    #[error("Action failed: {0}. Hint: check the selector is correct and the element exists at that point in the action sequence (e.g. after a prior click/scroll) -- retry with a corrected action list.")]
+    ActionFailed(String),
 }
 
 /// Fetches and extracts `url`, serving a cached result if one was fetched
 /// within the last `FetchCache` TTL. Pages change more often than search
-/// rankings, so this TTL is much shorter than `SearchCache`'s.
-pub async fn fetch_url(browser_state: &BrowserState, fetch_cache: &FetchCache, url: &str) -> Result<WebFetchResult, FetchError> {
-    if let Some(cached) = fetch_cache.get(url) {
-        return Ok(cached);
+/// rankings, so this TTL is much shorter than `SearchCache`'s. Caching is
+/// skipped entirely when `actions` is non-empty: the same URL can produce
+/// different content depending on what actions were applied, and this
+/// module doesn't key the cache on the action list.
+pub async fn fetch_url(
+    browser_state: &BrowserState,
+    fetch_cache: &FetchCache,
+    url: &str,
+    actions: &[PageAction],
+) -> Result<WebFetchResult, FetchError> {
+    if actions.is_empty() {
+        if let Some(cached) = fetch_cache.get(url) {
+            return Ok(cached);
+        }
     }
 
-    let result = fetch_url_uncached(browser_state, url).await?;
-    fetch_cache.set(url.to_string(), result.clone());
+    let result = fetch_url_uncached(browser_state, url, actions).await?;
+
+    if actions.is_empty() {
+        fetch_cache.set(url.to_string(), result.clone());
+    }
+
     Ok(result)
 }
 
-async fn fetch_url_uncached(browser_state: &BrowserState, url: &str) -> Result<WebFetchResult, FetchError> {
+async fn fetch_url_uncached(browser_state: &BrowserState, url: &str, actions: &[PageAction]) -> Result<WebFetchResult, FetchError> {
     // 0. Reject URLs that resolve to loopback/private/link-local/metadata
     // addresses before making any request against them, closing off
     // web_fetch as an SSRF vector into the host's internal network.
     validate_public_url(url).await?;
 
-    // 1. Check for GitHub Raw content first to bypass browser automation
-    if let Some(raw_url) = get_github_raw_url(url) {
-        match fetch_raw_content(&raw_url).await {
-            Ok(content) => {
-                return Ok(WebFetchResult {
-                    title: format!("GitHub Raw: {url}"),
-                    content,
-                });
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to fetch GitHub raw content: {e}. Falling back to browser.");
-            }
+    // 1. Try the browser-free fast paths (GitHub raw, PDF). Skipped when
+    // actions are requested: neither path touches a browser, so neither
+    // can honor them.
+    if actions.is_empty() {
+        if let Some(result) = try_fast_path(url).await? {
+            return Ok(result);
         }
     }
 
-    // 2. Check for PDF content and extract it directly, bypassing the
-    // browser (Chromium's built-in PDF viewer renders a viewer UI, not
-    // text this pipeline can read).
-    if let Some(result) = try_fetch_pdf(url).await? {
-        return Ok(result);
-    }
-
-    // 3. Fallback to Chromium-based browser.
+    // 2. Fallback to Chromium-based browser.
     let page = open_and_load_page(browser_state, url).await?;
+    run_actions(&page, actions).await?;
     let html_content = get_verified_html(&page).await?;
     let title = get_page_title(&page).await?;
 
@@ -234,26 +246,6 @@ async fn wait_for_content_stable(page: &Page) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn get_github_raw_url(url: &str) -> Option<String> {
-    if url.contains("github.com") && url.contains("/blob/") {
-        let mut raw_url = url.to_string().replace("github.com", "raw.githubusercontent.com");
-        raw_url = raw_url.replace("/blob/", "/");
-        Some(raw_url)
-    } else {
-        None
-    }
-}
-
-async fn fetch_raw_content(url: &str) -> anyhow::Result<String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .context("Failed to build HTTP client")?;
-    let res = client.get(url).send().await.context("Failed to send request")?;
-    let text = res.text().await.context("Failed to read response text")?;
-    Ok(text)
 }
 
 fn html_to_markdown(html_content: &str) -> Result<String, FetchError> {

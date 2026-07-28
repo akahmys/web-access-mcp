@@ -4,7 +4,7 @@ use tracing::{error, info};
 use crate::batch_fetch::{self, MAX_URLS};
 use crate::browser::BrowserState;
 use crate::error::AppResult;
-use crate::fetch::{fetch_url, FetchCache};
+use crate::fetch::{fetch_url, FetchCache, PageAction};
 use crate::mcp::{CallToolResult, ListToolsResult, McpContent, McpTool};
 use crate::search::{perform_web_search, SearchCache};
 use crate::smart_search::perform_smart_search;
@@ -56,7 +56,12 @@ fn web_fetch_tool() -> McpTool {
         input_schema: json!({
             "type": "object",
             "properties": {
-                "url": { "type": "string" }
+                "url": { "type": "string" },
+                "actions": {
+                    "type": "array",
+                    "description": "Optional ordered browser actions to apply before extracting content, e.g. [{\"type\":\"click\",\"selector\":\"#load-more\"},{\"type\":\"scroll\",\"target\":\"bottom\"}]. Supported: 'click' (needs 'selector'), 'scroll' (needs 'target': 'top'|'bottom'). No form-fill/login support. Using actions disables result caching for that call.",
+                    "items": { "type": "object" }
+                }
             },
             "required": ["url"]
         }),
@@ -163,7 +168,14 @@ async fn call_web_fetch(browser_state: &BrowserState, fetch_cache: &FetchCache, 
             "Missing 'url' argument in web_fetch. Hint: pass an absolute URL including the scheme, e.g. 'https://example.com/page'."
         ))?;
 
-    let result = fetch_url(browser_state, fetch_cache, url).await?;
+    let actions: Vec<PageAction> = match arguments.get("actions") {
+        Some(value) => serde_json::from_value(value.clone()).map_err(|e| anyhow::anyhow!(
+            "Invalid 'actions' argument in web_fetch: {e}. Hint: each action needs a 'type' of 'click' (with 'selector') or 'scroll' (with 'target': 'top' or 'bottom')."
+        ))?,
+        None => Vec::new(),
+    };
+
+    let result = fetch_url(browser_state, fetch_cache, url, &actions).await?;
     Ok(text_result(serde_json::to_string(&result)?))
 }
 

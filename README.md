@@ -30,7 +30,7 @@ Perform web searches without an API key.
 
 ### `web_fetch`
 The "Content Extractor" for deep-diving into documentation.
-*   **Input:** `url` (string, required)
+*   **Input:** `url` (string, required), `actions` (array, optional) -- an ordered list of browser actions to apply before extraction, e.g. `[{"type":"click","selector":"#load-more"},{"type":"scroll","target":"bottom"}]`. Supported: `click` (needs `selector`), `scroll` (needs `target`: `"top"` or `"bottom"`). No form-fill/login support -- deliberately minimal, and there's no raw JS `eval` primitive (that would make `web_fetch` a remote-code-execution vector against whatever the browser can reach). Using `actions` disables result caching for that call.
 *   **Output:** The core content of the page in clean Markdown, automatically truncated to ~10,000 characters at the nearest line boundary to protect context windows.
 *   **Special Features:**
     *   **SSRF Protection:** Before making any request, the target host is resolved via DNS and every resolved IP is checked against loopback/private/link-local/reserved ranges (including cloud metadata endpoints like `169.254.169.254`); matches are rejected outright. Checking the *resolved* IP rather than the literal URL closes the DNS-rebinding gap where a normal-looking hostname resolves to an internal address.

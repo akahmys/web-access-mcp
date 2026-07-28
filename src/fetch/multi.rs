@@ -11,7 +11,7 @@ pub async fn fetch_content_or_error(
     url: &str,
     max_len: usize,
 ) -> (Option<String>, Option<String>) {
-    match fetch_url(browser_state, fetch_cache, url).await {
+    match fetch_url(browser_state, fetch_cache, url, &[]).await {
         Ok(res) => (Some(truncate_content(&res.content, max_len)), None),
         Err(e) => {
             tracing::warn!("Failed to fetch content for {}: {}", url, e);

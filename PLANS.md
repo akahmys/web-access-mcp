@@ -75,6 +75,13 @@ Identified via a 2026-07-28 review of "what does this MCP still need as a web-ac
 
 ## 🚀 Short-Term Plan
 
+*   **[✅] AWU 5.10: Wire `check_secrets.sh` into a Pre-Commit Hook and CI**
+    *   **Objective**: `scripts/check_secrets.sh` existed but wasn't actually run by anything -- neither at commit time nor in CI. Connect it to both.
+    *   **Scope**: `.githooks/pre-commit` (new), `.github/workflows/ci.yml` (new -- no CI existed at all before this), `README.md`.
+    *   **DoD**: A `git commit` with staged secrets/absolute paths gets blocked locally (once `core.hooksPath` is configured); CI runs the same script in `--all` mode on every push/PR, alongside `cargo build`/`test`/`clippy --all-targets -- -D warnings`.
+    *   **Result**: Git hooks aren't tracked/shared by git itself, so used the `core.hooksPath` mechanism instead: added a tracked `.githooks/pre-commit` (thin wrapper that `exec`s `scripts/check_secrets.sh` in its default staged-diff mode) and set `git config core.hooksPath .githooks` locally; documented the one-time opt-in command in README for other clones, since core.hooksPath is per-clone config, not something a commit can silently turn on for everyone. Since no `.github/workflows/` existed at all, added `ci.yml` with two jobs: `build-test` (build/test/clippy, matching this session's local verification standard) and `secret-scan` (`check_secrets.sh --all`). Confirmed the existing integration tests don't need a real browser in CI -- they only exercise `initialize`/`tools/list`, never a tool call that would lazily launch Chromium. Verified both the hook (direct invocation) and `--all` mode locally before committing.
+    *   **Note**: `check_licenses.py` (the other audit script) was *not* wired into either the hook or CI -- the user's request named `check_secrets.sh` specifically; flagging this as a natural follow-up rather than doing it unprompted.
+
 *   **[ ] AWU 6.1: SSRF Protection for `web_fetch`** (security, do first)
     *   **Objective**: `web_fetch` currently navigates the shared browser to *any* URL an agent passes it, including `localhost`, RFC1918 private ranges, link-local addresses, and cloud metadata endpoints (`169.254.169.254`). If an agent is fed a malicious URL (e.g. via prompt injection from a page it's summarizing), this is a Server-Side Request Forgery vector into the host's internal network. Block it before the browser ever navigates.
     *   **Scope**: `src/fetch.rs` (new validation step ahead of `open_and_load_page`), `src/error.rs` or a new `FetchError` variant, unit tests in `src/fetch/tests.rs`.

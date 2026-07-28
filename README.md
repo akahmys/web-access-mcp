@@ -66,6 +66,13 @@ When a tool call fails (bad URL, timeout, CAPTCHA block, missing argument, etc.)
    ```
 3. The binary will be located in `target/release/web-access-mcp`.
 
+### Development
+Enable the repo's pre-commit hook (scans staged changes for secrets and absolute paths via `scripts/check_secrets.sh`) once per clone:
+```bash
+git config core.hooksPath .githooks
+```
+The same script (in `--all` mode) plus `cargo build`/`test`/`clippy --all-targets -- -D warnings` also run in CI on every push/PR (see `.github/workflows/ci.yml`).
+
 ### Integrating with MCP (e.g., Claude Desktop)
 Add the following to your `mcp_config.json`:
 

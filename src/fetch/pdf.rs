@@ -1,4 +1,5 @@
 use super::{truncate_content, FetchError, WebFetchResult, MAX_CONTENT_LENGTH};
+use crate::user_agent::user_agent;
 use std::time::Duration;
 
 /// If `url` looks like a PDF -- a successful `HEAD` reporting
@@ -18,6 +19,7 @@ pub(super) async fn try_fetch_pdf(url: &str) -> Result<Option<WebFetchResult>, F
 
     let bytes = client
         .get(url)
+        .header("User-Agent", user_agent())
         .send()
         .await
         .map_err(|e| FetchError::PdfExtraction(format!("request failed: {e}")))?
@@ -36,6 +38,7 @@ pub(super) async fn try_fetch_pdf(url: &str) -> Result<Option<WebFetchResult>, F
 async fn looks_like_pdf(client: &reqwest::Client, url: &str) -> bool {
     let content_type = client
         .head(url)
+        .header("User-Agent", user_agent())
         .send()
         .await
         .ok()

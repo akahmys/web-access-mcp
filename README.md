@@ -10,7 +10,7 @@
 *   **💎 Zero Cost:** No API keys required. No Google Search API costs. No OpenAI/Anthropic scraping costs. Uses a real browser instance to fetch what you need for free.
 *   **⚡ Token Efficiency:** Built-in "Smart Token Cutter" and GitHub-specific fallbacks ensure you never hit LLM context limits with massive, irrelevant HTML.
 *   **⚡ Fast Search:** `web_search`/`smart_search` resolve queries via a lightweight HTTP request against Bing's RSS search feed — no browser startup cost, no CSS-selector scraping.
-*   **🛡️ Reliable Fetching:** `web_fetch` uses `chromiumoxide` to drive a persistent, shared browser session for pages that need real rendering, with a realistic User-Agent and CAPTCHA/block detection.
+*   **🛡️ Reliable Fetching:** `web_fetch` uses `chromiumoxide` to drive a persistent, shared browser session for pages that need real rendering, with a varying User-Agent, proxy support, robots.txt compliance, retry-with-backoff, and CAPTCHA/block detection.
 *   **📦 Single Binary (Mostly):** A high-performance Rust implementation that works out of the box in any environment with a browser (Chrome/Edge/Chromium) installed.
 
 ---
@@ -34,6 +34,8 @@ The "Content Extractor" for deep-diving into documentation.
 *   **Output:** The core content of the page in clean Markdown, automatically truncated to ~10,000 characters at the nearest line boundary to protect context windows.
 *   **Special Features:**
     *   **SSRF Protection:** Before making any request, the target host is resolved via DNS and every resolved IP is checked against loopback/private/link-local/reserved ranges (including cloud metadata endpoints like `169.254.169.254`); matches are rejected outright. Checking the *resolved* IP rather than the literal URL closes the DNS-rebinding gap where a normal-looking hostname resolves to an internal address.
+    *   **robots.txt:** Checked before every fetch; disallowed paths are rejected. Fails *open* (allows the fetch) if `robots.txt` is missing, unreachable, or unparseable, matching standard crawler convention. Set `WEB_FETCH_IGNORE_ROBOTS=1` on the server to skip this check entirely.
+    *   **Retry:** One automatic retry with backoff on transient-looking failures (timeout, navigation, page-creation errors) before surfacing an error -- not retried for failures where it's known to be pointless, like a CAPTCHA block.
     *   **GitHub Optimization:** If the URL is a GitHub file/blob URL (contains `github.com` and `/blob/`), it bypasses the browser and pulls the raw source code directly for maximum speed and clarity. Other `github.com` pages (repo home, issues, PRs, etc.) go through the normal browser fetch path.
     *   **PDF Support:** URLs that report (or look like) `application/pdf` are downloaded directly and their text extracted with `pdf-extract`, bypassing the browser entirely (Chromium's built-in PDF viewer renders a viewer UI, not extractable text). Scanned/image-only PDFs with no text layer aren't supported.
     *   **Readability Pipeline:** 
@@ -97,6 +99,10 @@ Add the following to your `mcp_config.json`:
 ```
 *(Note: `CHROME_PATH` is optional if Chrome is in your default system path.)*
 
+### Other Environment Variables
+*   **`HTTP_PROXY`/`HTTPS_PROXY`** (and lowercase variants): Honored for both the HTTP clients (`reqwest` respects these by default) and the browser (passed through explicitly via `--proxy-server`, since Chromium doesn't read them on its own).
+*   **`WEB_FETCH_IGNORE_ROBOTS`**: Set to any value to skip the `robots.txt` check on `web_fetch`.
+
 ---
 
 ## 🏗️ Technical Stack
@@ -109,6 +115,7 @@ Add the following to your `mcp_config.json`:
 *   **Extraction:** `readabilityrs`
 *   **PDF Text Extraction:** `pdf-extract`
 *   **SSRF Protection:** `ipnet` (CIDR range checks against resolved IPs)
+*   **robots.txt:** `texting_robots`
 *   **Serialization:** `serde`
 *   **Error Handling:** `thiserror` (typed domain errors carrying agent-facing hints) + `anyhow` (top-level propagation)
 *   **Networking:** `reqwest` (search HTTP requests, GitHub raw fetch, PDF download)

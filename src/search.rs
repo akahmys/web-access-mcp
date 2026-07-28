@@ -1,5 +1,6 @@
 use crate::browser::BrowserState;
 use crate::cache::TtlCache;
+use crate::user_agent::user_agent;
 use serde::Deserialize;
 use std::time::Duration;
 use serde::Serialize;
@@ -73,7 +74,7 @@ async fn fetch_bing_results(client: &reqwest::Client, query: &str) -> Result<Vec
     let url = format!("https://www.bing.com/search?q={}&format=rss", urlencoding::encode(query));
     let response = client
         .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+        .header("User-Agent", user_agent())
         .header("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
         .send()
         .await

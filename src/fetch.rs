@@ -1,11 +1,9 @@
-use anyhow::Context;
 use chromiumoxide::page::Page;
 use crate::browser::BrowserState;
 use crate::cache::TtlCache;
 use readabilityrs::Readability;
 use html_to_markdown_rs::convert;
 use serde::Serialize;
-use std::time::Duration;
 use thiserror::Error;
 
 mod pdf;
@@ -16,6 +14,12 @@ use fast_path::try_fast_path;
 
 mod ssrf;
 use ssrf::validate_public_url;
+
+mod robots;
+use robots::check_robots_txt;
+
+mod navigate;
+use navigate::open_and_load_page_with_retry;
 
 mod multi;
 pub use multi::fetch_content_or_error;
@@ -85,6 +89,9 @@ pub enum FetchError {
 
     #[error("Action failed: {0}. Hint: check the selector is correct and the element exists at that point in the action sequence (e.g. after a prior click/scroll) -- retry with a corrected action list.")]
     ActionFailed(String),
+
+    #[error("Blocked by robots.txt: {0}. Hint: this host's robots.txt disallows automated access to this path. Don't retry -- try a different URL or ask the user for the specific content. (Server operators who've decided robots.txt shouldn't apply to single agent-directed fetches can set WEB_FETCH_IGNORE_ROBOTS=1.)")]
+    RobotsDisallowed(String),
 }
 
 /// Fetches and extracts `url`, serving a cached result if one was fetched
@@ -120,6 +127,10 @@ async fn fetch_url_uncached(browser_state: &BrowserState, url: &str, actions: &[
     // web_fetch as an SSRF vector into the host's internal network.
     validate_public_url(url).await?;
 
+    // 0.5. Respect the host's robots.txt (fails open if it's missing,
+    // unreachable, or unparseable -- see robots.rs).
+    check_robots_txt(url).await?;
+
     // 1. Try the browser-free fast paths (GitHub raw, PDF). Skipped when
     // actions are requested: neither path touches a browser, so neither
     // can honor them.
@@ -130,7 +141,7 @@ async fn fetch_url_uncached(browser_state: &BrowserState, url: &str, actions: &[
     }
 
     // 2. Fallback to Chromium-based browser.
-    let page = open_and_load_page(browser_state, url).await?;
+    let page = open_and_load_page_with_retry(browser_state, url).await?;
     run_actions(&page, actions).await?;
     let html_content = get_verified_html(&page).await?;
     let title = get_page_title(&page).await?;
@@ -139,31 +150,6 @@ async fn fetch_url_uncached(browser_state: &BrowserState, url: &str, actions: &[
     let content = truncate_content(&markdown_content, MAX_CONTENT_LENGTH);
 
     Ok(WebFetchResult { title, content })
-}
-
-/// Opens a new page in the shared browser and navigates it to `url`,
-/// waiting for the DOM to load and stabilize under a fixed timeout. Only
-/// the page-creation call is made under the shared browser lock; the
-/// navigation below runs against this page's own CDP session, so
-/// concurrent fetches don't serialize on each other.
-async fn open_and_load_page(browser_state: &BrowserState, url: &str) -> Result<Page, FetchError> {
-    let page = browser_state
-        .new_page()
-        .await
-        .map_err(|e| FetchError::PageCreation(e.to_string()))?;
-
-    let page_load_timeout = Duration::from_secs(15);
-    let nav_result = tokio::time::timeout(page_load_timeout, async {
-        page.goto(url).await.context("Failed to navigate to URL")?;
-        wait_for_page_load(&page).await.context("Failed to wait for page load")?;
-        anyhow::Ok(())
-    }).await;
-
-    match nav_result {
-        Err(_) => Err(FetchError::Timeout(page_load_timeout.as_secs())),
-        Ok(Err(e)) => Err(FetchError::Navigation(format!("{e:#}"))),
-        Ok(Ok(())) => Ok(page),
-    }
 }
 
 /// Fetches the page's rendered HTML and rejects known CAPTCHA/block pages.
@@ -188,64 +174,6 @@ async fn get_page_title(page: &Page) -> Result<String, FetchError> {
         .map_err(|e| FetchError::Title(e.to_string()))?
         .unwrap_or_else(|| "No Title".to_string());
     Ok(title)
-}
-
-async fn wait_for_page_load(page: &Page) -> anyhow::Result<()> {
-    wait_for_document_ready(page).await?;
-    wait_for_content_stable(page).await
-}
-
-/// Waits for `document.readyState` to become 'complete'.
-async fn wait_for_document_ready(page: &Page) -> anyhow::Result<()> {
-    let _ = page.evaluate(r"
-        () => {
-            return new Promise((resolve) => {
-                if (document.readyState === 'complete') {
-                    resolve('complete');
-                } else {
-                    window.addEventListener('load', () => resolve('complete'));
-                }
-            });
-        }
-    ").await.context("Failed to evaluate load script")?;
-    Ok(())
-}
-
-/// Polls `document.body.innerText.length` until it stops growing for two
-/// consecutive checks, giving client-rendered (SPA) content a chance to
-/// finish painting before extraction runs.
-async fn wait_for_content_stable(page: &Page) -> anyhow::Result<()> {
-    let mut last_length: usize = 0;
-    let mut stable_count = 0;
-    let max_attempts = 5;
-
-    for _ in 0..max_attempts {
-        let length_val: f64 = page
-            .evaluate("document.body.innerText.length")
-            .await?
-            .into_value::<f64>()?;
-
-        // `innerText.length` is a JS string length: always a non-negative
-        // integer far below usize::MAX, so this narrowing cast can't
-        // truncate or lose sign in practice.
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let current_length = length_val as usize;
-
-        if current_length > 0 && current_length == last_length {
-            stable_count += 1;
-        } else {
-            stable_count = 0;
-        }
-
-        if stable_count >= 2 {
-            break;
-        }
-
-        last_length = current_length;
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-
-    Ok(())
 }
 
 fn html_to_markdown(html_content: &str) -> Result<String, FetchError> {

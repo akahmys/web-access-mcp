@@ -10,6 +10,7 @@ mod smart_search;
 mod batch_fetch;
 mod handlers;
 mod cache;
+mod user_agent;
 
 use tracing::{info, error};
 use error::AppResult;

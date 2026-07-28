@@ -6,6 +6,7 @@ use std::env;
 use std::path::PathBuf;
 use tokio::sync::{RwLock, Mutex};
 use crate::error::{AppError, BrowserError};
+use crate::user_agent::user_agent;
 use futures_util::StreamExt;
 use tracing::{info, warn};
 
@@ -40,12 +41,20 @@ impl BrowserState {
             .arg("--no-sandbox")
             .arg("--disable-dev-shm-usage")
             .arg("--disable-gpu")
-            .arg("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+            .arg(format!("--user-agent={}", user_agent()))
             .user_data_dir(&user_data_dir);
 
         if let Ok(chrome_path) = env::var("CHROME_PATH") {
             info!("Using custom CHROME_PATH: {}", chrome_path);
             builder = builder.chrome_executable(chrome_path);
+        }
+
+        // Chromium doesn't read HTTP_PROXY/HTTPS_PROXY itself (unlike
+        // reqwest, which honors them by default); pass one through
+        // explicitly via --proxy-server if the operator set one.
+        if let Some(proxy) = proxy_from_env() {
+            info!("Using proxy: {}", proxy);
+            builder = builder.arg(format!("--proxy-server={proxy}"));
         }
 
         let config = builder
@@ -102,4 +111,13 @@ impl BrowserState {
         }
         Ok(())
     }
+}
+
+/// Checks the standard proxy env vars, preferring an HTTPS-specific proxy
+/// over a generic one, and upper-case (the conventional form) over
+/// lower-case (some tools/shells only set the latter).
+fn proxy_from_env() -> Option<String> {
+    ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]
+        .into_iter()
+        .find_map(|var| env::var(var).ok())
 }

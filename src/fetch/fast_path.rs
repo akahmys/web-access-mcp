@@ -1,4 +1,5 @@
 use super::{try_fetch_pdf, FetchError, WebFetchResult};
+use crate::user_agent::user_agent;
 use anyhow::Context;
 use std::time::Duration;
 
@@ -38,7 +39,7 @@ async fn fetch_raw_content(url: &str) -> anyhow::Result<String> {
         .timeout(Duration::from_secs(15))
         .build()
         .context("Failed to build HTTP client")?;
-    let res = client.get(url).send().await.context("Failed to send request")?;
+    let res = client.get(url).header("User-Agent", user_agent()).send().await.context("Failed to send request")?;
     let text = res.text().await.context("Failed to read response text")?;
     Ok(text)
 }

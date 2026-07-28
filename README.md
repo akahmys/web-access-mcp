@@ -42,6 +42,11 @@ The "Content Extractor" for deep-diving into documentation.
     *   **Smart Truncation:** Safely cuts content at the last newline to prevent context overflow.
     *   **Caching:** Results are cached per-URL for 10 minutes, so re-fetching a URL an agent already visited (including via `smart_search`) skips the browser entirely.
 
+### `batch_fetch`
+For when you already have a list of URLs and just want their content -- no search step, unlike `smart_search`.
+*   **Input:** `urls` (array of strings, required, max 10)
+*   **Output:** A JSON array of per-URL results, fetched concurrently. Same shape as `smart_search`'s items: if a given URL fails, `content` is omitted and an `error` field explains why instead of failing the whole call.
+
 ---
 
 ## ⚠️ Error Handling

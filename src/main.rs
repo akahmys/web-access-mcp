@@ -7,6 +7,7 @@ mod transport;
 mod browser;
 mod search;
 mod smart_search;
+mod batch_fetch;
 mod handlers;
 mod cache;
 

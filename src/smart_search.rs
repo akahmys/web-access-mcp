@@ -1,10 +1,12 @@
 use crate::browser::BrowserState;
-use crate::fetch::{fetch_url, truncate_content, FetchCache};
+use crate::fetch::{fetch_content_or_error, FetchCache};
 use crate::search::{perform_web_search, SearchCache, SearchResult};
 use anyhow::Result;
 use futures_util::future::join_all;
 use serde::Serialize;
-use tracing::{info, warn};
+use tracing::info;
+
+const PER_ITEM_CONTENT_LIMIT: usize = 2500;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SmartSearchItem {
@@ -63,16 +65,6 @@ pub async fn perform_smart_search(
 /// whole `smart_search` call.
 async fn fetch_one_item(browser_state: BrowserState, fetch_cache: &FetchCache, item: SearchResult) -> SmartSearchItem {
     let SearchResult { title, url, snippet } = item;
-
-    let (content, error) = match fetch_url(&browser_state, fetch_cache, &url).await {
-        Ok(res) => (Some(truncate_content(&res.content, 2500)), None),
-        Err(e) => {
-            // FetchError's message already contains its own hint, so it's
-            // used verbatim rather than nested inside another hint.
-            warn!("Failed to fetch content for {}: {}", url, e);
-            (None, Some(format!("Content unavailable for this result: {e}")))
-        }
-    };
-
+    let (content, error) = fetch_content_or_error(&browser_state, fetch_cache, &url, PER_ITEM_CONTENT_LIMIT).await;
     SmartSearchItem { title, url, snippet, content, error }
 }

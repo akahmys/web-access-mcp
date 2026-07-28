@@ -14,6 +14,9 @@ use pdf::try_fetch_pdf;
 mod ssrf;
 use ssrf::validate_public_url;
 
+mod multi;
+pub use multi::fetch_content_or_error;
+
 const MAX_CONTENT_LENGTH: usize = 10000;
 
 pub type FetchCache = TtlCache<WebFetchResult>;

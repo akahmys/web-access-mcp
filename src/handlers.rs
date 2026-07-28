@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use tracing::{error, info};
 
+use crate::batch_fetch::{self, MAX_URLS};
 use crate::browser::BrowserState;
 use crate::error::AppResult;
 use crate::fetch::{fetch_url, FetchCache};
@@ -10,43 +11,74 @@ use crate::smart_search::perform_smart_search;
 
 pub async fn list_tools_handler() -> AppResult<ListToolsResult> {
     let tools = vec![
-        McpTool {
-            name: "smart_search".to_string(),
-            description: "Perform web search and automatically fetch extracted Markdown content from top result pages in a single call.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "The search query" },
-                    "max_pages": { "type": "integer", "description": "Number of top pages to fetch content from (default: 3, max: 5)" }
-                },
-                "required": ["query"]
-            }),
-        },
-        McpTool {
-            name: "web_search".to_string(),
-            description: "Search the web (Bing) and return raw search result snippets".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string" }
-                },
-                "required": ["query"]
-            }),
-        },
-        McpTool {
-            name: "web_fetch".to_string(),
-            description: "Fetch content from a single URL and convert to Markdown".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "url": { "type": "string" }
-                },
-                "required": ["url"]
-            }),
-        },
+        smart_search_tool(),
+        web_search_tool(),
+        web_fetch_tool(),
+        batch_fetch_tool(),
     ];
 
     Ok(ListToolsResult { tools })
+}
+
+fn smart_search_tool() -> McpTool {
+    McpTool {
+        name: "smart_search".to_string(),
+        description: "Perform web search and automatically fetch extracted Markdown content from top result pages in a single call.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "The search query" },
+                "max_pages": { "type": "integer", "description": "Number of top pages to fetch content from (default: 3, max: 5)" }
+            },
+            "required": ["query"]
+        }),
+    }
+}
+
+fn web_search_tool() -> McpTool {
+    McpTool {
+        name: "web_search".to_string(),
+        description: "Search the web (Bing) and return raw search result snippets".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string" }
+            },
+            "required": ["query"]
+        }),
+    }
+}
+
+fn web_fetch_tool() -> McpTool {
+    McpTool {
+        name: "web_fetch".to_string(),
+        description: "Fetch content from a single URL and convert to Markdown".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string" }
+            },
+            "required": ["url"]
+        }),
+    }
+}
+
+fn batch_fetch_tool() -> McpTool {
+    McpTool {
+        name: "batch_fetch".to_string(),
+        description: "Fetch multiple URLs concurrently and convert each to Markdown in a single call. For when you already have the URLs; use smart_search instead if you need to search first.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "urls": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": format!("URLs to fetch (max {MAX_URLS})")
+                }
+            },
+            "required": ["urls"]
+        }),
+    }
 }
 
 pub async fn call_tool_handler(
@@ -62,10 +94,11 @@ pub async fn call_tool_handler(
         "smart_search" => call_smart_search(browser_state, search_cache, fetch_cache, arguments).await,
         "web_search" => call_web_search(browser_state, search_cache, arguments).await,
         "web_fetch" => call_web_fetch(browser_state, fetch_cache, arguments).await,
+        "batch_fetch" => call_batch_fetch(browser_state, fetch_cache, arguments).await,
         _ => {
             error!("Unknown tool: {}", name);
             Err(anyhow::anyhow!(
-                "Unknown tool: '{name}'. Hint: call tools/list to see available tools; valid names are 'smart_search', 'web_search', and 'web_fetch'."
+                "Unknown tool: '{name}'. Hint: call tools/list to see available tools; valid names are 'smart_search', 'web_search', 'web_fetch', and 'batch_fetch'."
             ))
         }
     }
@@ -132,4 +165,25 @@ async fn call_web_fetch(browser_state: &BrowserState, fetch_cache: &FetchCache, 
 
     let result = fetch_url(browser_state, fetch_cache, url).await?;
     Ok(text_result(serde_json::to_string(&result)?))
+}
+
+async fn call_batch_fetch(browser_state: &BrowserState, fetch_cache: &FetchCache, arguments: &Value) -> AppResult<CallToolResult> {
+    let urls: Vec<String> = arguments
+        .get("urls")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!(
+            "Missing 'urls' argument in batch_fetch. Hint: pass a non-empty array of absolute URLs, e.g. [\"https://example.com/a\", \"https://example.com/b\"]."
+        ))?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+
+    if urls.is_empty() {
+        return Err(anyhow::anyhow!(
+            "'urls' argument in batch_fetch is empty. Hint: pass at least one absolute URL."
+        ));
+    }
+
+    let results = batch_fetch::fetch_many(browser_state, fetch_cache, &urls).await;
+    Ok(text_result(serde_json::to_string(&results)?))
 }

@@ -1,6 +1,6 @@
 use crate::browser::BrowserState;
 use crate::fetch::{fetch_url, truncate_content};
-use crate::search::{perform_google_search, SearchCache, SearchResult};
+use crate::search::{perform_web_search, SearchCache, SearchResult};
 use anyhow::Result;
 use futures_util::future::join_all;
 use serde::Serialize;
@@ -32,7 +32,7 @@ pub async fn perform_smart_search(
 ) -> Result<SmartSearchResult> {
     info!("Performing smart_search for query: '{}' (max_pages: {})", query, max_pages);
 
-    let search_results = perform_google_search(browser_state, search_cache, query).await?;
+    let search_results = perform_web_search(browser_state, search_cache, query).await?;
     let total_found = search_results.len();
 
     let target_items: Vec<_> = search_results.into_iter().take(max_pages).collect();

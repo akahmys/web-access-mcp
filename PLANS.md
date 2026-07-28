@@ -35,6 +35,15 @@
     *   Audit code for memory leaks and thread safety.
     *   Final documentation and binary release.
 
+### Phase 6: Security, Capability & Reliability Hardening (long-term, in progress)
+Identified via a 2026-07-28 review of "what does this MCP still need as a web-access tool for agents." Ordered by priority: security first, then capability gaps, then general scraping reliability. See the detailed AWU 6.x entries in the Short-Term Plan for Objective/Scope/DoD on each.
+*   **AWU 6.1: SSRF Protection for `web_fetch`** (security, highest priority)
+*   **AWU 6.2: PDF/Binary Content Support for `web_fetch`** -- done
+*   **AWU 6.3: `web_fetch` Result Caching**
+*   **AWU 6.4: Batch-Fetch Tool (concurrent fetch of N given URLs)**
+*   **AWU 6.5: Page Interaction Primitives (click/scroll/form-fill) for `web_fetch`**
+*   **AWU 6.6: Scraping Reliability Hardening (robots.txt, UA rotation, proxy, retry backoff)**
+
 ---
 
 ## 📝 Execution Log
@@ -60,11 +69,54 @@
 
 ## 🎯 Current Status
 **Current Phase:** Post-v0.1 Reliability & Polish
-**Current Objective:** v0.1 is tagged and pushed. Ongoing work hardens error reporting and keeps docs in sync with the implementation as tools evolve (`smart_search`, HTTP-based search).
+**Current Objective:** v0.1 is tagged and pushed. Search backend is now Bing-only (`web_search`); a long-term roadmap (Phase 6 below) covers the next round of security/capability/reliability work, starting with SSRF protection on `web_fetch`.
 
 ---
 
 ## 🚀 Short-Term Plan
+
+*   **[ ] AWU 6.1: SSRF Protection for `web_fetch`** (security, do first)
+    *   **Objective**: `web_fetch` currently navigates the shared browser to *any* URL an agent passes it, including `localhost`, RFC1918 private ranges, link-local addresses, and cloud metadata endpoints (`169.254.169.254`). If an agent is fed a malicious URL (e.g. via prompt injection from a page it's summarizing), this is a Server-Side Request Forgery vector into the host's internal network. Block it before the browser ever navigates.
+    *   **Scope**: `src/fetch.rs` (new validation step ahead of `open_and_load_page`), `src/error.rs` or a new `FetchError` variant, unit tests in `src/fetch/tests.rs`.
+    *   **DoD**: URLs resolving to loopback (`127.0.0.0/8`, `::1`), private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local (`169.254.0.0/16`, `fe80::/10`), and other non-routable ranges are rejected with a clear `Hint:`-bearing error *before* any network/browser call is made (resolve the hostname first, then check the IP -- reject on DNS resolution too, not just literal-IP URLs, to close the DNS-rebinding gap). Legit public URLs are unaffected; add tests covering both.
+    *   **Result**: _not started_
+
+*   **[✅] AWU 6.2: PDF/Binary Content Support for `web_fetch`**
+    *   **Objective**: `web_fetch` assumes HTML; a PDF URL (common for papers/specs/docs) currently either fails or gets mangled through the Readability/Markdown pipeline. Detect PDF responses and extract text instead.
+    *   **Scope**: `src/fetch.rs`, `src/fetch/pdf.rs` (new), `Cargo.toml`, `README.md`, `ARCHITECTURE.md`.
+    *   **DoD**: `web_fetch` on a PDF URL (detected via `Content-Type` or `.pdf` extension) returns extracted text content instead of an HTML-pipeline error; non-PDF binary content still fails with a clear `Hint:` (not silently mangled).
+    *   **Result**: Chose `pdf-extract` (simple `extract_text_from_mem(&[u8]) -> Result<String, OutputError>` API, sufficient for readable-text extraction) over `lopdf` (lower-level, would need manual text-layer walking). Detection: a best-effort `HEAD` request checks `Content-Type` for `application/pdf`; if `HEAD` fails or is inconclusive, falls back to a `.pdf`-suffix URL heuristic. On a PDF match, downloads via `reqwest::get` and extracts text -- the browser is never launched (Chromium's built-in PDF viewer renders a viewer UI, not text this pipeline could read). Added `FetchError::PdfExtraction` for genuine extraction failures (encrypted/corrupted/scanned-image PDFs). Extracted the new logic into `src/fetch/pdf.rs` (mirroring the existing `src/fetch/tests.rs` submodule pattern) to keep `fetch.rs` under CODING.md's 300-line limit -- it would've been 303 lines inline. Verified live against two real PDFs: a small W3C test PDF (~14 bytes of body text) and the 15-page "Attention Is All You Need" arXiv paper, both returning clean extracted text with no browser launched in either case.
+
+*   **[ ] AWU 6.3: `web_fetch` Result Caching**
+    *   **Objective**: `google_search`/`web_search` already has a `SearchCache`; `web_fetch` has none, so repeated fetches of the same URL (e.g. an agent re-reading a doc page across turns, or `smart_search` re-visiting a URL already seen in a prior call) always pay full browser-launch + page-load cost.
+    *   **Scope**: `src/fetch.rs` (new TTL cache, likely mirroring `search::SearchCache`'s `DashMap` design), `src/main.rs`/`src/handlers.rs` (thread the cache through like `SearchCache` is).
+    *   **DoD**: A second `web_fetch` call to the same URL within the cache TTL returns cached content without launching a browser page. TTL should be shorter than search's 1 hour (pages change more often than search rankings) -- pick something like 10-15 minutes, but this is a judgment call worth confirming before implementing.
+    *   **Result**: _not started_
+
+*   **[ ] AWU 6.4: Batch-Fetch Tool**
+    *   **Objective**: `smart_search` always couples "search" with "fetch top N results"; there's no tool for the simpler case of "fetch these N URLs I already have, concurrently." Add one.
+    *   **Scope**: New function (likely `src/fetch.rs` or a small new module) reusing `fetch_url` + `join_all` the same way `smart_search::fetch_one_item` does; new tool registration in `src/handlers.rs` and the `McpTool` schema; `README.md`/`ARCHITECTURE.md`.
+    *   **DoD**: New tool accepts `urls: string[]` (with a sane max count, e.g. 5-10, mirroring `smart_search`'s `max_pages` cap) and returns per-URL results (content or a per-item `error` with hint, same pattern as `SmartSearchItem`) in one call.
+    *   **Result**: _not started_
+
+*   **[ ] AWU 6.5: Page Interaction Primitives for `web_fetch`**
+    *   **Objective**: `web_fetch` only supports a single passive page load; it can't click, scroll, or fill forms, so login-gated pages and infinite-scroll content are out of reach. Add a minimal, safe set of pre-extraction actions.
+    *   **Scope**: `src/fetch.rs` (extend the load pipeline with an optional action-execution step before extraction), MCP tool schema (new optional `actions` parameter on `web_fetch`), design doc/discussion before implementation.
+    *   **DoD**: `web_fetch` accepts an optional ordered list of simple, whitelisted actions (e.g. `{"click": "<selector>"}`, `{"scroll": "bottom"}`, `{"fill": {"selector": "...", "value": "..."}}`) applied before extraction.
+    *   **Note**: highest-risk item on this list, both in complexity (action vocabulary design) and security (must NOT expose raw/arbitrary JS `eval` to the calling agent -- that would turn `web_fetch` into a remote-code-execution primitive against whatever the browser can reach, compounding the SSRF risk from AWU 6.1 if that lands first as expected). Needs its own design pass before coding starts.
+    *   **Result**: _not started_
+
+*   **[ ] AWU 6.6: Scraping Reliability Hardening**
+    *   **Objective**: No `robots.txt` awareness, a single hardcoded User-Agent, no proxy support, and no retry/backoff on transient failures. Fine at low volume; all four become real problems at scale.
+    *   **Scope**: `src/fetch.rs`, `src/browser.rs`, `Cargo.toml` (robots.txt parser crate).
+    *   **DoD**: `web_fetch` checks `robots.txt` disallow rules before fetching (with an env-var opt-out for operators who accept the tradeoff, since this is a policy choice, not just a technical one); User-Agent varies instead of one fixed string; `HTTP_PROXY`/`HTTPS_PROXY` env vars are honored; transient network failures get one automatic retry with backoff before surfacing as an error.
+    *   **Result**: _not started_
+
+*   **[✅] AWU 5.9: Switch Search Backend to Bing-Only, Rename `google_search` → `web_search`**
+    *   **Objective**: Replace the DuckDuckGo-primary/Google-fallback search implementation with a single Bing backend for better result quality and simpler code (user's explicit preference), and rename the tool to `web_search` since `google_search` was already inaccurate (it never used Google as primary) and would become more so.
+    *   **Scope**: `src/search.rs`, `src/search/tests.rs`, `src/smart_search.rs`, `src/handlers.rs`, `src/fetch.rs` (one hint string), `tests/integration_test.rs`, `README.md`, `ARCHITECTURE.md`, `Cargo.toml`.
+    *   **DoD**: `web_search`/`smart_search` return real Bing results end-to-end; `cargo build`/`test`/`clippy --all-targets -- -D warnings` clean; no remaining `google_search`/DuckDuckGo references outside historical `PLANS.md` log entries.
+    *   **Result**: Investigated `bing.com/search`'s plain HTML response first -- it no longer server-renders results (client-side rendered, zero result links in the raw HTML) -- but discovered Bing's documented `&format=rss` output mode returns clean, stable, structured XML instead, which is more robust than HTML/CSS-selector scraping. Rewrote `search.rs` around this: dropped `SearchError::Selector`/`BothBackendsFailed`/DuckDuckGo+Google fallback logic entirely, added `SearchError::RequestFailed`, and parse the RSS via `quick-xml`'s serde integration (`BingRss`/`BingChannel`/`BingItem` structs) instead of manual XML handling. Removed the now-unused `scraper` dependency, added `quick-xml` (with `serialize` feature). Renamed `perform_google_search` → `perform_web_search`, the MCP tool `google_search` → `web_search`, and `call_google_search` → `call_web_search` in `handlers.rs`; updated the tool's `McpTool` description, `tests/integration_test.rs`'s assertions, and one `web_fetch` CAPTCHA-block hint string that recommended `google_search`. `search.rs` shrank from 236 to 138 lines. Verified live via the compiled binary: `web_search` returns ~10 real Bing results per query (vs. 5 capped on the old DuckDuckGo path), `smart_search` correctly chains search + concurrent fetch on top of it. Updated README.md/ARCHITECTURE.md's tool descriptions, diagram, and Technical Stack tables accordingly.
 
 *   **[✅] AWU 5.8: README Accuracy Pass & MIT License**
     *   **Objective**: Re-audit `README.md` against the codebase (requested independently of the AWU 5.7 pass) and fix what's found.

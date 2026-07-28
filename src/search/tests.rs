@@ -18,14 +18,9 @@ fn test_search_cache_ttl() {
 }
 
 #[test]
-fn test_parse_search_results() {
-    let html = r#"
-        <div class="g">
-            <h3><a href="https://example.com">Example Title</a></h3>
-            <div class="VwiAwd">Example snippet text.</div>
-        </div>
-    "#;
-    let results = parse_search_results(html).unwrap();
+fn test_parse_bing_rss() {
+    let xml = r#"<?xml version="1.0" encoding="utf-8" ?><rss version="2.0"><channel><title>Bing: example</title><item><title>Example Title</title><link>https://example.com</link><description>Example snippet text.</description><pubDate>Mon, 27 Jul 2026 00:00:00 GMT</pubDate></item></channel></rss>"#;
+    let results = parse_bing_rss(xml).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].title, "Example Title");
     assert_eq!(results[0].url, "https://example.com");

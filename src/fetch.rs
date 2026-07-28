@@ -7,6 +7,9 @@ use serde::Serialize;
 use std::time::Duration;
 use thiserror::Error;
 
+mod pdf;
+use pdf::try_fetch_pdf;
+
 const MAX_CONTENT_LENGTH: usize = 10000;
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,7 +37,7 @@ pub enum FetchError {
     #[error("Failed to get page content: {0}. Hint: the page may have crashed or navigated away -- retry the web_fetch call once.")]
     PageContent(String),
 
-    #[error("Access to the page was blocked by Cloudflare or CAPTCHA protection. Hint: don't retry this exact URL, it will likely block again -- use google_search or smart_search to find an alternative source, or ask the user for a different link.")]
+    #[error("Access to the page was blocked by Cloudflare or CAPTCHA protection. Hint: don't retry this exact URL, it will likely block again -- use web_search or smart_search to find an alternative source, or ask the user for a different link.")]
     Blocked,
 
     #[error("Failed to get title: {0}. Hint: transient browser error -- retry the web_fetch call once.")]
@@ -54,6 +57,9 @@ pub enum FetchError {
 
     #[error("Markdown conversion produced no content. Hint: the extracted article was empty after conversion -- try a different URL.")]
     EmptyMarkdown,
+
+    #[error("Failed to extract text from PDF: {0}. Hint: the PDF may be a scanned image with no text layer (OCR isn't supported), encrypted, or corrupted -- try a different URL, or ask the user for the specific text needed.")]
+    PdfExtraction(String),
 }
 
 pub async fn fetch_url(browser_state: &BrowserState, url: &str) -> Result<WebFetchResult, FetchError> {
@@ -72,7 +78,14 @@ pub async fn fetch_url(browser_state: &BrowserState, url: &str) -> Result<WebFet
         }
     }
 
-    // 2. Fallback to Chromium-based browser.
+    // 2. Check for PDF content and extract it directly, bypassing the
+    // browser (Chromium's built-in PDF viewer renders a viewer UI, not
+    // text this pipeline can read).
+    if let Some(result) = try_fetch_pdf(url).await? {
+        return Ok(result);
+    }
+
+    // 3. Fallback to Chromium-based browser.
     let page = open_and_load_page(browser_state, url).await?;
     let html_content = get_verified_html(&page).await?;
     let title = get_page_title(&page).await?;

@@ -9,7 +9,7 @@
 *   **🎯 High Precision (Markdown-First):** Automatically converts noisy HTML into clean, structured Markdown. No more wading through ads, navbars, or footers.
 *   **💎 Zero Cost:** No API keys required. No Google Search API costs. No OpenAI/Anthropic scraping costs. Uses a real browser instance to fetch what you need for free.
 *   **⚡ Token Efficiency:** Built-in "Smart Token Cutter" and GitHub-specific fallbacks ensure you never hit LLM context limits with massive, irrelevant HTML.
-*   **⚡ Fast Search:** `google_search`/`smart_search` resolve queries via a lightweight HTTP request (DuckDuckGo, with a Google HTML fallback) — no browser startup cost, typically ~200ms.
+*   **⚡ Fast Search:** `web_search`/`smart_search` resolve queries via a lightweight HTTP request against Bing's RSS search feed — no browser startup cost, no CSS-selector scraping.
 *   **🛡️ Reliable Fetching:** `web_fetch` uses `chromiumoxide` to drive a persistent, shared browser session for pages that need real rendering, with a realistic User-Agent and CAPTCHA/block detection.
 *   **📦 Single Binary (Mostly):** A high-performance Rust implementation that works out of the box in any environment with a browser (Chrome/Edge/Chromium) installed.
 
@@ -22,10 +22,10 @@ One-stop web research tool that performs search and concurrently fetches extract
 *   **Input:** `query` (string, required), `max_pages` (integer, optional, default 3, max 5)
 *   **Output:** Aggregated JSON with search snippets and full extracted Markdown content for top result pages. If content couldn't be fetched for a given result, `content` is omitted and an `error` field explains why (e.g. blocked, timed out) with a hint for what to try next.
 
-### `google_search`
+### `web_search`
 Perform web searches without an API key.
 *   **Input:** `query` (string)
-*   **Output:** A structured list of search results (Title, URL, and Snippet) in JSON format. Capped at 5 results on the primary DuckDuckGo path; the Google HTML fallback (used only if DuckDuckGo fails) is uncapped and may return more.
+*   **Output:** A structured list of search results (Title, URL, and Snippet) in JSON format, parsed from Bing's `format=rss` search feed (typically ~10 results per query).
 *   **Optimization:** Uses an in-memory cache to prevent redundant requests and avoid being flagged.
 
 ### `web_fetch`
@@ -34,6 +34,7 @@ The "Content Extractor" for deep-diving into documentation.
 *   **Output:** The core content of the page in clean Markdown, automatically truncated to ~10,000 characters at the nearest line boundary to protect context windows.
 *   **Special Features:**
     *   **GitHub Optimization:** If the URL is a GitHub file/blob URL (contains `github.com` and `/blob/`), it bypasses the browser and pulls the raw source code directly for maximum speed and clarity. Other `github.com` pages (repo home, issues, PRs, etc.) go through the normal browser fetch path.
+    *   **PDF Support:** URLs that report (or look like) `application/pdf` are downloaded directly and their text extracted with `pdf-extract`, bypassing the browser entirely (Chromium's built-in PDF viewer renders a viewer UI, not extractable text). Scanned/image-only PDFs with no text layer aren't supported.
     *   **Readability Pipeline:** 
         - **Extraction:** Uses `readabilityrs` to isolate the main article content (removing noise like ads, nav, and sidebars).
         - **Conversion:** Uses `html-to-markdown-rs` to transform the clean HTML into high-fidelity Markdown.
@@ -43,7 +44,7 @@ The "Content Extractor" for deep-diving into documentation.
 
 ## ⚠️ Error Handling
 
-When a tool call fails (bad URL, timeout, CAPTCHA block, missing argument, etc.), the response is a normal MCP tool error (`isError: true`) containing a descriptive message plus a `Hint:` clause telling the calling agent what to try next (e.g. retry once, try a different URL, use `google_search` to find an alternative source). A single failed call never crashes the server or the rest of the session.
+When a tool call fails (bad URL, timeout, CAPTCHA block, missing argument, etc.), the response is a normal MCP tool error (`isError: true`) containing a descriptive message plus a `Hint:` clause telling the calling agent what to try next (e.g. retry once, try a different URL, use `web_search` to find an alternative source). A single failed call never crashes the server or the rest of the session.
 
 ---
 
@@ -89,12 +90,13 @@ Add the following to your `mcp_config.json`:
 *   **Language:** Rust (for memory safety and speed)
 *   **Async Runtime:** `tokio`
 *   **Browser Automation:** `chromiumoxide` (CDP)
-*   **Parsing:** `scraper` (CSS selectors)
+*   **Search Parsing:** `quick-xml` (Bing's RSS search feed)
 *   **Markdown:** `html-to-markdown-rs`
 *   **Extraction:** `readabilityrs`
+*   **PDF Text Extraction:** `pdf-extract`
 *   **Serialization:** `serde`
 *   **Error Handling:** `thiserror` (typed domain errors carrying agent-facing hints) + `anyhow` (top-level propagation)
-*   **Networking:** `reqwest` (search HTTP requests, GitHub raw fetch)
+*   **Networking:** `reqwest` (search HTTP requests, GitHub raw fetch, PDF download)
 
 ---
 

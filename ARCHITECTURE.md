@@ -35,8 +35,8 @@ graph TD
         end
 
         subgraph ENGINE [Extraction Engine]
-            HANDLER -->|HTTP GET| SEARCHHTTP[reqwest: DuckDuckGo HTML, Google HTML fallback]
-            SEARCHHTTP -->|Search HTML| GOOGLE[scraper Parser]
+            HANDLER -->|HTTP GET, format=rss| SEARCHHTTP[reqwest: Bing RSS search feed]
+            SEARCHHTTP -->|RSS XML| BING[quick-xml Parser]
             BROWSER -->|DOM Content| READ[Readability (Extraction)]
             READ -->|Clean HTML| MD[Markdown Converter]
             HANDLER -->|Raw Source via reqwest| GITHUB[GitHub Raw Fallback]
@@ -47,7 +47,7 @@ graph TD
     end
 
     MD -->|Clean Markdown| AI
-    GOOGLE -->|Structured Results| AI
+    BING -->|Structured Results| AI
     GITHUB -->|Clean Code| AI
     SMART -->|Aggregated snippets + Markdown| AI
 ```
@@ -61,10 +61,11 @@ To ensure the agent can fetch multiple pages within the same session, the browse
 - **`SearchCache`**: A `DashMap`-backed in-memory cache with TTL (1 hour) to prevent redundant search requests and minimize latency.
 
 ### 3. Extraction & Transformation Engine
-- **`google_search`**: Does *not* use the browser. Issues a plain `reqwest` HTTP GET against DuckDuckGo's HTML endpoint first; if that fails or returns zero results, falls back to a Google HTML search request. Both are parsed with `scraper` into a structured list (Title, URL, Snippet).
-- **`smart_search`**: Runs `google_search` internally, then concurrently calls `web_fetch` (via `join_all`) on the top `max_pages` results to attach extracted Markdown content to each item in a single tool call. Per-item fetch failures don't fail the whole call — that item just carries an `error` explanation instead of `content`.
+- **`web_search`**: Does *not* use the browser. Issues a plain `reqwest` HTTP GET against Bing's `format=rss` search feed -- a documented, purpose-built machine-readable output mode, not HTML/CSS-selector scraping -- and parses the response as structured XML with `quick-xml` into a list (Title, URL, Snippet), typically ~10 results per query.
+- **`smart_search`**: Runs `web_search` internally, then concurrently calls `web_fetch` (via `join_all`) on the top `max_pages` results to attach extracted Markdown content to each item in a single tool call. Per-item fetch failures don't fail the whole call — that item just carries an `error` explanation instead of `content`.
 - **`web_fetch`**:
     - **GitHub Logic**: Detects `github.com/.../blob/...` URLs and switches to a plain `reqwest` fetch of the raw file content, bypassing the browser entirely.
+    - **PDF Logic** (`src/fetch/pdf.rs`): Sniffs `Content-Type` via a `HEAD` request (falling back to a `.pdf` URL-extension heuristic if `HEAD` is inconclusive); if it looks like a PDF, downloads it with `reqwest` and extracts text with `pdf-extract`, bypassing the browser entirely (Chromium's built-in PDF viewer renders a viewer UI, not extractable text). No OCR -- scanned/image-only PDFs aren't supported.
     - **Browser Fallback**: Otherwise opens a page in the shared `chromiumoxide` browser, waits for the DOM to stabilize, and checks for Cloudflare/CAPTCHA block pages before extracting content.
     - **Readability Pipeline**:
         1. **Extraction**: Uses `readabilityrs` to isolate the main article content (removing noise like ads, nav, and sidebars).
@@ -80,9 +81,10 @@ To ensure the agent can fetch multiple pages within the same session, the browse
 | :--- | :--- | :--- |
 | **Runtime** | `tokio` | High-performance asynchronous I/O. |
 | **Browser** | `chromiumoxide` | Reliable CDP-based control of real Chrome/Edge. |
-| **Parsing** | `scraper` | Fast and precise CSS selector-based HTML parsing. |
+| **Search Parsing** | `quick-xml` | Structured XML parsing for Bing's RSS search feed. |
 | **Markdown** | `html-to-markdown-rs` | Robust HTML-to-Markdown conversion. |
 | **Extraction** | `readabilityrs` | Noise removal (ads, nav, sidebars) via readability algorithm. |
+| **PDF** | `pdf-extract` | Text extraction from PDF byte streams, no browser involved. |
 | **Serialization**| `serde` | Industry standard for high-speed JSON processing. |
 | **Networking** | `reqwest` | For lightweight, non-browser HTTP requests (search, GitHub raw). |
 | **Error Handling** | `thiserror` + `anyhow` | `thiserror` models typed, agent-facing domain errors (`FetchError`, `SearchError`) in `fetch.rs`/`search.rs`; `anyhow` propagates them (plus top-level ad hoc errors) up through `handlers.rs`/`main.rs` to the MCP response. |

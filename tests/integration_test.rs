@@ -34,7 +34,7 @@ fn test_mcp_list_tools() {
 
     // 5. Verify the response contains expected tools
     assert!(response.contains("tools"), "Response does not contain tools structure");
-    assert!(response.contains("google_search"), "Response does not contain google_search tool");
+    assert!(response.contains("web_search"), "Response does not contain web_search tool");
     assert!(response.contains("web_fetch"), "Response does not contain web_fetch tool");
 
     // Clean up
@@ -69,7 +69,7 @@ fn test_mcp_standard_flow() {
 
     let mut list_response = String::new();
     reader.read_line(&mut list_response).expect("Failed to read tools/list response");
-    assert!(list_response.contains("google_search"), "Response missing google_search");
+    assert!(list_response.contains("web_search"), "Response missing web_search");
     assert!(list_response.contains("web_fetch"), "Response missing web_fetch");
 
     let _ = child.kill();

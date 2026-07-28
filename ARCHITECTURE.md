@@ -64,6 +64,7 @@ To ensure the agent can fetch multiple pages within the same session, the browse
 - **`web_search`**: Does *not* use the browser. Issues a plain `reqwest` HTTP GET against Bing's `format=rss` search feed -- a documented, purpose-built machine-readable output mode, not HTML/CSS-selector scraping -- and parses the response as structured XML with `quick-xml` into a list (Title, URL, Snippet), typically ~10 results per query.
 - **`smart_search`**: Runs `web_search` internally, then concurrently calls `web_fetch` (via `join_all`) on the top `max_pages` results to attach extracted Markdown content to each item in a single tool call. Per-item fetch failures don't fail the whole call — that item just carries an `error` explanation instead of `content`.
 - **`web_fetch`**:
+    - **SSRF Protection** (`src/fetch/ssrf.rs`): The very first step for every `url`, before GitHub/PDF/browser dispatch. Parses the URL, rejects non-http(s) schemes, resolves the host via DNS, and checks *every* resolved `IpAddr` (including the IPv4 address inside an IPv4-mapped IPv6 literal) against loopback/RFC1918-private/CGNAT/link-local/IPv6-unique-local ranges using `ipnet`. Resolving before checking (rather than pattern-matching the literal URL) closes the DNS-rebinding gap, and link-local coverage includes the `169.254.169.254` cloud metadata endpoint.
     - **GitHub Logic**: Detects `github.com/.../blob/...` URLs and switches to a plain `reqwest` fetch of the raw file content, bypassing the browser entirely.
     - **PDF Logic** (`src/fetch/pdf.rs`): Sniffs `Content-Type` via a `HEAD` request (falling back to a `.pdf` URL-extension heuristic if `HEAD` is inconclusive); if it looks like a PDF, downloads it with `reqwest` and extracts text with `pdf-extract`, bypassing the browser entirely (Chromium's built-in PDF viewer renders a viewer UI, not extractable text). No OCR -- scanned/image-only PDFs aren't supported.
     - **Browser Fallback**: Otherwise opens a page in the shared `chromiumoxide` browser, waits for the DOM to stabilize, and checks for Cloudflare/CAPTCHA block pages before extracting content.
@@ -85,6 +86,7 @@ To ensure the agent can fetch multiple pages within the same session, the browse
 | **Markdown** | `html-to-markdown-rs` | Robust HTML-to-Markdown conversion. |
 | **Extraction** | `readabilityrs` | Noise removal (ads, nav, sidebars) via readability algorithm. |
 | **PDF** | `pdf-extract` | Text extraction from PDF byte streams, no browser involved. |
+| **SSRF Protection** | `ipnet` | CIDR containment checks against DNS-resolved IPs before any fetch. |
 | **Serialization**| `serde` | Industry standard for high-speed JSON processing. |
 | **Networking** | `reqwest` | For lightweight, non-browser HTTP requests (search, GitHub raw). |
 | **Error Handling** | `thiserror` + `anyhow` | `thiserror` models typed, agent-facing domain errors (`FetchError`, `SearchError`) in `fetch.rs`/`search.rs`; `anyhow` propagates them (plus top-level ad hoc errors) up through `handlers.rs`/`main.rs` to the MCP response. |

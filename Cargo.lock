@@ -2699,6 +2699,7 @@ dependencies = [
  "dashmap",
  "futures-util",
  "html-to-markdown-rs",
+ "ipnet",
  "pdf-extract",
  "quick-xml",
  "readabilityrs",

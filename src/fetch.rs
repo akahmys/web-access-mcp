@@ -10,6 +10,9 @@ use thiserror::Error;
 mod pdf;
 use pdf::try_fetch_pdf;
 
+mod ssrf;
+use ssrf::validate_public_url;
+
 const MAX_CONTENT_LENGTH: usize = 10000;
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,9 +63,20 @@ pub enum FetchError {
 
     #[error("Failed to extract text from PDF: {0}. Hint: the PDF may be a scanned image with no text layer (OCR isn't supported), encrypted, or corrupted -- try a different URL, or ask the user for the specific text needed.")]
     PdfExtraction(String),
+
+    #[error("Invalid URL: {0}. Hint: check that this is a well-formed, absolute http/https URL.")]
+    InvalidUrl(String),
+
+    #[error("Blocked for security: {0}. Hint: web_fetch refuses to access private/internal network addresses (localhost, RFC1918 ranges, link-local, cloud metadata endpoints) -- this isn't a transient failure, don't retry; use a public URL instead.")]
+    SsrfBlocked(String),
 }
 
 pub async fn fetch_url(browser_state: &BrowserState, url: &str) -> Result<WebFetchResult, FetchError> {
+    // 0. Reject URLs that resolve to loopback/private/link-local/metadata
+    // addresses before making any request against them, closing off
+    // web_fetch as an SSRF vector into the host's internal network.
+    validate_public_url(url).await?;
+
     // 1. Check for GitHub Raw content first to bypass browser automation
     if let Some(raw_url) = get_github_raw_url(url) {
         match fetch_raw_content(&raw_url).await {

@@ -33,6 +33,7 @@ The "Content Extractor" for deep-diving into documentation.
 *   **Input:** `url` (string, required)
 *   **Output:** The core content of the page in clean Markdown, automatically truncated to ~10,000 characters at the nearest line boundary to protect context windows.
 *   **Special Features:**
+    *   **SSRF Protection:** Before making any request, the target host is resolved via DNS and every resolved IP is checked against loopback/private/link-local/reserved ranges (including cloud metadata endpoints like `169.254.169.254`); matches are rejected outright. Checking the *resolved* IP rather than the literal URL closes the DNS-rebinding gap where a normal-looking hostname resolves to an internal address.
     *   **GitHub Optimization:** If the URL is a GitHub file/blob URL (contains `github.com` and `/blob/`), it bypasses the browser and pulls the raw source code directly for maximum speed and clarity. Other `github.com` pages (repo home, issues, PRs, etc.) go through the normal browser fetch path.
     *   **PDF Support:** URLs that report (or look like) `application/pdf` are downloaded directly and their text extracted with `pdf-extract`, bypassing the browser entirely (Chromium's built-in PDF viewer renders a viewer UI, not extractable text). Scanned/image-only PDFs with no text layer aren't supported.
     *   **Readability Pipeline:** 
@@ -101,6 +102,7 @@ Add the following to your `mcp_config.json`:
 *   **Markdown:** `html-to-markdown-rs`
 *   **Extraction:** `readabilityrs`
 *   **PDF Text Extraction:** `pdf-extract`
+*   **SSRF Protection:** `ipnet` (CIDR range checks against resolved IPs)
 *   **Serialization:** `serde`
 *   **Error Handling:** `thiserror` (typed domain errors carrying agent-facing hints) + `anyhow` (top-level propagation)
 *   **Networking:** `reqwest` (search HTTP requests, GitHub raw fetch, PDF download)

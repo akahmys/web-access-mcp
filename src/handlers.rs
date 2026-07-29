@@ -1,13 +1,14 @@
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
 use tracing::{error, info};
 
 use crate::batch_fetch::{self, MAX_URLS};
 use crate::browser::BrowserState;
 use crate::error::AppResult;
 use crate::fetch::{fetch_url, FetchCache, PageAction};
-use crate::mcp::{CallToolResult, ListToolsResult, McpContent, McpTool};
 use crate::search::{perform_web_search, SearchCache};
 use crate::smart_search::perform_smart_search;
+use rust_mcp_schema::{CallToolResult, ContentBlock, ListToolsResult, TextContent, Tool, ToolInputSchema};
 
 pub async fn list_tools_handler() -> AppResult<ListToolsResult> {
     let tools = vec![
@@ -17,73 +18,90 @@ pub async fn list_tools_handler() -> AppResult<ListToolsResult> {
         batch_fetch_tool(),
     ];
 
-    Ok(ListToolsResult { tools })
+    Ok(ListToolsResult { meta: None, next_cursor: None, tools })
 }
 
-fn smart_search_tool() -> McpTool {
-    McpTool {
-        name: "smart_search".to_string(),
-        description: "Perform web search and automatically fetch extracted Markdown content from top result pages in a single call.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "query": { "type": "string", "description": "The search query" },
-                "max_pages": { "type": "integer", "description": "Number of top pages to fetch content from (default: 3, max: 5)" }
-            },
-            "required": ["query"]
-        }),
+/// Builds a `Tool` from just the parts that vary per tool, filling in the
+/// rest (annotations, execution hints, icons, output schema, title) with
+/// their empty/`None` defaults -- none of our tools use those fields.
+fn tool(name: &str, description: &str, input_schema: ToolInputSchema) -> Tool {
+    Tool {
+        name: name.to_string(),
+        description: Some(description.to_string()),
+        input_schema,
+        annotations: None,
+        execution: None,
+        icons: Vec::new(),
+        meta: None,
+        output_schema: None,
+        title: None,
     }
 }
 
-fn web_search_tool() -> McpTool {
-    McpTool {
-        name: "web_search".to_string(),
-        description: "Search the web (Bing) and return raw search result snippets".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "query": { "type": "string" }
-            },
-            "required": ["query"]
-        }),
-    }
+/// Converts a list of `(property name, JSON Schema object)` pairs into the
+/// `BTreeMap<String, Map<String, Value>>` shape `ToolInputSchema::properties`
+/// requires. Each schema value must already be a JSON object; any that
+/// aren't are silently dropped, since these are our own hardcoded literals
+/// below, not external input -- correctness is verified by inspection/tests.
+fn schema_properties(fields: &[(&str, Value)]) -> BTreeMap<String, Map<String, Value>> {
+    fields
+        .iter()
+        .filter_map(|(name, schema)| schema.as_object().map(|obj| ((*name).to_string(), obj.clone())))
+        .collect()
 }
 
-fn web_fetch_tool() -> McpTool {
-    McpTool {
-        name: "web_fetch".to_string(),
-        description: "Fetch content from a single URL and convert to Markdown".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "url": { "type": "string" },
-                "actions": {
-                    "type": "array",
-                    "description": "Optional ordered browser actions to apply before extracting content, e.g. [{\"type\":\"click\",\"selector\":\"#load-more\"},{\"type\":\"scroll\",\"target\":\"bottom\"}]. Supported: 'click' (needs 'selector'), 'scroll' (needs 'target': 'top'|'bottom'). No form-fill/login support. Using actions disables result caching for that call.",
-                    "items": { "type": "object" }
-                }
-            },
-            "required": ["url"]
-        }),
-    }
+fn smart_search_tool() -> Tool {
+    let input_schema = ToolInputSchema::new(
+        vec!["query".to_string()],
+        Some(schema_properties(&[
+            ("query", json!({ "type": "string", "description": "The search query" })),
+            ("max_pages", json!({ "type": "integer", "description": "Number of top pages to fetch content from (default: 3, max: 5)" })),
+        ])),
+        None,
+    );
+    tool(
+        "smart_search",
+        "Perform web search and automatically fetch extracted Markdown content from top result pages in a single call.",
+        input_schema,
+    )
 }
 
-fn batch_fetch_tool() -> McpTool {
-    McpTool {
-        name: "batch_fetch".to_string(),
-        description: "Fetch multiple URLs concurrently and convert each to Markdown in a single call. For when you already have the URLs; use smart_search instead if you need to search first.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "urls": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": format!("URLs to fetch (max {MAX_URLS})")
-                }
-            },
-            "required": ["urls"]
-        }),
-    }
+fn web_search_tool() -> Tool {
+    let input_schema = ToolInputSchema::new(
+        vec!["query".to_string()],
+        Some(schema_properties(&[("query", json!({ "type": "string" }))])),
+        None,
+    );
+    tool("web_search", "Search the web (Bing) and return raw search result snippets", input_schema)
+}
+
+fn web_fetch_tool() -> Tool {
+    let actions_description = "Optional ordered browser actions to apply before extracting content, e.g. [{\"type\":\"click\",\"selector\":\"#load-more\"},{\"type\":\"scroll\",\"target\":\"bottom\"}]. Supported: 'click' (needs 'selector'), 'scroll' (needs 'target': 'top'|'bottom'). No form-fill/login support. Using actions disables result caching for that call.";
+    let input_schema = ToolInputSchema::new(
+        vec!["url".to_string()],
+        Some(schema_properties(&[
+            ("url", json!({ "type": "string" })),
+            ("actions", json!({ "type": "array", "description": actions_description, "items": { "type": "object" } })),
+        ])),
+        None,
+    );
+    tool("web_fetch", "Fetch content from a single URL and convert to Markdown", input_schema)
+}
+
+fn batch_fetch_tool() -> Tool {
+    let input_schema = ToolInputSchema::new(
+        vec!["urls".to_string()],
+        Some(schema_properties(&[(
+            "urls",
+            json!({ "type": "array", "items": { "type": "string" }, "description": format!("URLs to fetch (max {MAX_URLS})") }),
+        )])),
+        None,
+    );
+    tool(
+        "batch_fetch",
+        "Fetch multiple URLs concurrently and convert each to Markdown in a single call. For when you already have the URLs; use smart_search instead if you need to search first.",
+        input_schema,
+    )
 }
 
 pub async fn call_tool_handler(
@@ -111,12 +129,10 @@ pub async fn call_tool_handler(
 
 fn text_result(text: String) -> CallToolResult {
     CallToolResult {
-        content: vec![McpContent {
-            content_type: "text".to_string(),
-            text: Some(text),
-            image: None,
-        }],
+        content: vec![ContentBlock::TextContent(TextContent::new(text, None, None))],
         is_error: Some(false),
+        meta: None,
+        structured_content: None,
     }
 }
 

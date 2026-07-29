@@ -53,7 +53,7 @@ graph TD
 ```
 
 ### 1. MCP Layer (`src/mcp.rs`, `src/transport.rs`, `src/main.rs`, `src/handlers.rs`)
-Handles the lifecycle of the MCP server, listening on `stdin` and communicating via `stdout`. `src/main.rs` dispatches incoming JSON-RPC `initialize` / `tools/list` / `tools/call` requests to per-method handler functions; `src/handlers.rs` implements the actual tool dispatch (`list_tools_handler`, `call_tool_handler`) and per-tool argument parsing.
+Handles the lifecycle of the MCP server, listening on `stdin` and communicating via `stdout`. `src/main.rs` dispatches incoming JSON-RPC `initialize` / `tools/list` / `tools/call` requests to per-method handler functions; `src/handlers.rs` implements the actual tool dispatch (`list_tools_handler`, `call_tool_handler`) and per-tool argument parsing. `src/mcp.rs` only defines the generic JSON-RPC 2.0 transport envelope (`JsonRpcRequest`/`JsonRpcResponse`/`JsonRpcNotification`/`JsonRpcError`); the MCP-specific payload types (`InitializeResult`, `Implementation`, `ServerCapabilities`, `Tool`, `ToolInputSchema`, `CallToolResult`, `ContentBlock`, etc.) come from the `rust-mcp-schema` crate rather than being hand-rolled, so the server tracks the current MCP spec version (`ProtocolVersion::latest()`) and field naming without manual upkeep.
 
 ### 2. Shared State Management (`BrowserState`)
 To ensure the agent can fetch multiple pages within the same session, the browser is not launched per-request but lazily on first `web_fetch`/`smart_search` call, then shared for the lifetime of the server process.
@@ -93,3 +93,4 @@ To ensure the agent can fetch multiple pages within the same session, the browse
 | **Serialization**| `serde` | Industry standard for high-speed JSON processing. |
 | **Networking** | `reqwest` | For lightweight, non-browser HTTP requests (search, GitHub raw, PDF, robots.txt); honors `HTTP_PROXY`/`HTTPS_PROXY` by default. |
 | **Error Handling** | `thiserror` + `anyhow` | `thiserror` models typed, agent-facing domain errors (`FetchError`, `SearchError`) in `fetch.rs`/`search.rs`; `anyhow` propagates them (plus top-level ad hoc errors) up through `handlers.rs`/`main.rs` to the MCP response. |
+| **MCP Protocol Types** | `rust-mcp-schema` | serde-based, async-runtime-agnostic type definitions for MCP payloads (`InitializeResult`, `Tool`, `CallToolResult`, `ContentBlock`, ...); tracks the current MCP spec version instead of hand-rolled structs. |

@@ -119,6 +119,7 @@ Add the following to your `mcp_config.json`:
 *   **Serialization:** `serde`
 *   **Error Handling:** `thiserror` (typed domain errors carrying agent-facing hints) + `anyhow` (top-level propagation)
 *   **Networking:** `reqwest` (search HTTP requests, GitHub raw fetch, PDF download)
+*   **MCP Protocol Types:** `rust-mcp-schema` (typed request/response payloads, e.g. `InitializeResult`, `Tool`, `CallToolResult`)
 
 ---
 

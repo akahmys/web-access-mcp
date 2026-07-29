@@ -16,12 +16,14 @@ use tracing::{info, error};
 use error::AppResult;
 use crate::mcp::{
     JsonRpcMessage, JsonRpcRequest, JsonRpcResponse, JsonRpcError, ErrorDetails,
-    CallToolRequest, CallToolResult, McpContent, InitializeResult, ServerCapabilities,
-    ImplementationInfo,
 };
 use crate::transport::StdioTransport;
 use crate::browser::BrowserState;
 use crate::handlers::{call_tool_handler, list_tools_handler};
+use rust_mcp_schema::{
+    CallToolRequestParams, CallToolResult, ContentBlock, Implementation, InitializeResult,
+    ProtocolVersion, ServerCapabilities, ServerCapabilitiesTools, TextContent,
+};
 use serde_json::{json, Value};
 use std::time::Duration;
 use crate::search::SearchCache;
@@ -118,13 +120,20 @@ async fn write_response<T: serde::Serialize>(
 
 async fn handle_initialize(transport: &mut StdioTransport, id: Value) -> AppResult<()> {
     let result = InitializeResult {
-        protocol_version: "2024-11-05".to_string(),
         capabilities: ServerCapabilities {
-            tools: Some(json!({})),
+            tools: Some(ServerCapabilitiesTools { list_changed: None }),
+            ..Default::default()
         },
-        server_info: ImplementationInfo {
+        instructions: None,
+        meta: None,
+        protocol_version: ProtocolVersion::latest().to_string(),
+        server_info: Implementation {
             name: "web-access-mcp".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
+            title: None,
+            description: None,
+            icons: Vec::new(),
+            website_url: None,
         },
     };
     write_response(transport, result, id).await
@@ -147,9 +156,10 @@ async fn handle_tools_call(
     req: JsonRpcRequest,
 ) -> AppResult<()> {
     let call_result: AppResult<CallToolResult> = match &req.params {
-        Some(params) => match serde_json::from_value::<CallToolRequest>(params.clone()) {
+        Some(params) => match serde_json::from_value::<CallToolRequestParams>(params.clone()) {
             Ok(call_req) => {
-                call_tool_handler(browser_state, search_cache, fetch_cache, &call_req.name, &call_req.arguments).await
+                let arguments = Value::Object(call_req.arguments.unwrap_or_default());
+                call_tool_handler(browser_state, search_cache, fetch_cache, &call_req.name, &arguments).await
             }
             Err(e) => Err(anyhow::anyhow!(
                 "Invalid CallToolRequest: {e}. Hint: 'arguments' must be a JSON object matching the target tool's inputSchema (see tools/list) -- check for missing fields or wrong types."
@@ -174,12 +184,10 @@ async fn handle_tools_call(
 fn error_to_call_result(e: &anyhow::Error) -> CallToolResult {
     error!("CallTool error: {:?}", e);
     CallToolResult {
-        content: vec![McpContent {
-            content_type: "text".to_string(),
-            text: Some(format!("{e:#}")),
-            image: None,
-        }],
+        content: vec![ContentBlock::TextContent(TextContent::new(format!("{e:#}"), None, None))],
         is_error: Some(true),
+        meta: None,
+        structured_content: None,
     }
 }
 

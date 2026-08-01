@@ -1,4 +1,3 @@
-use crate::browser::BrowserState;
 use crate::cache::TtlCache;
 use crate::user_agent::user_agent;
 use serde::Deserialize;
@@ -51,8 +50,26 @@ struct BingItem {
     description: String,
 }
 
-pub async fn perform_web_search(
-    _browser_state: &BrowserState,
+pub trait SearchProvider: Send + Sync {
+    fn search(&self, query: &str) -> impl std::future::Future<Output = Result<Vec<SearchResult>, SearchError>> + Send;
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct BingSearchProvider;
+
+impl SearchProvider for BingSearchProvider {
+    async fn search(&self, query: &str) -> Result<Vec<SearchResult>, SearchError> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| SearchError::ClientBuild(e.to_string()))?;
+
+        fetch_bing_results(&client, query).await
+    }
+}
+
+pub async fn perform_web_search<P: SearchProvider + ?Sized>(
+    provider: &P,
     cache: &SearchCache,
     query: &str,
 ) -> Result<Vec<SearchResult>, SearchError> {
@@ -60,20 +77,16 @@ pub async fn perform_web_search(
         return Ok(cached);
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| SearchError::ClientBuild(e.to_string()))?;
-
-    let results = fetch_bing_results(&client, query).await?;
+    let results = provider.search(query).await?;
     cache.set(query.to_string(), results.clone());
     Ok(results)
 }
 
 async fn fetch_bing_results(client: &reqwest::Client, query: &str) -> Result<Vec<SearchResult>, SearchError> {
-    let url = format!("https://www.bing.com/search?q={}&format=rss", urlencoding::encode(query));
+    let url = reqwest::Url::parse_with_params("https://www.bing.com/search", &[("q", query), ("format", "rss")])
+        .map_err(|e| SearchError::RequestFailed(format!("failed to parse search URL: {e}")))?;
     let response = client
-        .get(&url)
+        .get(url)
         .header("User-Agent", user_agent())
         .header("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
         .send()

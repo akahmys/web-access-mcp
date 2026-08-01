@@ -75,3 +75,29 @@ fn test_mcp_standard_flow() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+#[test]
+fn test_mcp_invalid_tool_error() {
+    let mut child = Command::new("target/debug/web-access-mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn web-access-mcp process");
+
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    let stdout = child.stdout.take().expect("Failed to open stdout");
+    let mut reader = BufReader::new(stdout);
+
+    // Call a nonexistent tool and verify isError: true with a hint
+    let invalid_tool_req = r#"{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"nonexistent_tool","arguments":{}}}"#;
+    writeln!(stdin, "{invalid_tool_req}").expect("Failed to write invalid tool call");
+
+    let mut response = String::new();
+    reader.read_line(&mut response).expect("Failed to read invalid tool response");
+    assert!(response.contains("isError"), "Response missing isError field");
+    assert!(response.contains("Unknown tool: 'nonexistent_tool'"), "Response missing unknown tool error text");
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+

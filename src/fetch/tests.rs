@@ -13,6 +13,15 @@ fn test_content_truncation() {
 }
 
 #[test]
+fn test_content_truncation_multibyte() {
+    // 3 bytes per Japanese character. 5 bytes falls in the middle of 'い'
+    let content = "あいうえおかきくけこ";
+    let truncated = truncate_content(content, 5);
+    // Should safely fallback to 3 bytes ('あ') instead of panicking
+    assert_eq!(truncated, "あ...");
+}
+
+#[test]
 fn test_html_to_markdown_conversion() {
     let html = r#"
         <!DOCTYPE html>

@@ -76,6 +76,29 @@ Identified via a 2026-07-28 review of "what does this MCP still need as a web-ac
 
 ## 🚀 Short-Term Plan
 
+*   **[✅] AWU 7.2: Architectural Hardening & Pluggable SearchProvider**
+    *   **Objective**: Enhance system resilience and architecture: (1) Enforce a 10MB download size cap on HTTP/PDF fetches to prevent OOM attacks, (2) Add self-healing browser recovery when Chromium CDP connection dies, (3) Add background/active eviction (`evict_expired`) for `TtlCache`, and (4) Abstract search into a unified `SearchProvider` trait for flexible search engine switching.
+    *   **Scope**: `src/search.rs`, `src/browser.rs`, `src/cache.rs`, `src/fetch/pdf.rs`, `src/fetch/fast_path.rs`, `src/context.rs`.
+    *   **DoD**:
+        1. `SearchProvider` trait defined and implemented by `BingSearchProvider`, allowing easy search engine replacement.
+        2. `BrowserState` detects dead browser connections and re-launches Chromium automatically.
+        3. `TtlCache::evict_expired` removes stale entries.
+        4. PDF and HTTP downloads cap body reads at 10MB limit.
+        5. `cargo test` and `cargo clippy --all-targets -- -D warnings` pass clean with 0 warnings.
+    *   **Result**: Defined `SearchProvider` trait in `src/search.rs` and implemented `BingSearchProvider`, registering it in `AppContext` so any search engine can be swapped seamlessly. Added self-healing recovery in `BrowserState::new_page` (`src/browser.rs`) to auto-restart Chromium if CDP page creation fails. Added `evict_expired()` to `TtlCache` (`src/cache.rs`) and `evict_expired_caches()` to `AppContext`, wired to pings/messages in `main.rs` to prevent long-term memory growth. Enforced a 10MB `MAX_DOWNLOAD_SIZE` limit in `src/fetch/pdf.rs` and `src/fetch/fast_path.rs` for PDF and GitHub raw fetches to protect against OOM memory exhaustion. Added unit test `test_ttl_cache_evict_expired` in `src/cache/tests.rs`. All 17 unit tests and 3 integration tests passed cleanly; `cargo clippy --all-targets -- -D warnings` passed with 0 warnings.
+
+*   **[✅] AWU 7.1: Comprehensive Codebase Refactoring & Quality Hardening**
+    *   **Objective**: Comprehensive refactoring across architecture, data structures, data operations, error handling, and potential logical bugs (e.g. UTF-8 slice panic risk in `truncate_content`, redundant `BrowserState` dependencies in search, argument extraction boilerplate in handlers, and `AppContext` encapsulation).
+    *   **Scope**: `src/main.rs`, `src/handlers.rs`, `src/search.rs`, `src/fetch.rs`, `src/browser.rs`, `src/error.rs`, `src/smart_search.rs`, `src/batch_fetch.rs`, `src/cache.rs`, `src/context.rs`, `tests/integration_test.rs`.
+    *   **DoD**: 
+        1. Fix potential UTF-8 multi-byte slicing panic in `truncate_content`.
+        2. Introduce `AppContext` to encapsulate shared state (`BrowserState`, `SearchCache`, `FetchCache`) and clean up function signatures (remove `_browser_state` from `web_search`).
+        3. Clean up and unify error handling: consolidate `AppError`/`BrowserError`/`AppResult` inconsistencies in `src/error.rs`.
+        4. Eliminate argument parsing boilerplate in `src/handlers.rs` with concise helpers.
+        5. Use `reqwest::Url::parse_with_params` in `src/search.rs` for type-safe query construction.
+        6. All unit & integration tests pass cleanly with `cargo test` and `cargo clippy --all-targets -- -D warnings`.
+    *   **Result**: Created `src/context.rs` containing `AppContext` and updated `main.rs`, `handlers.rs`, `smart_search.rs`, and `batch_fetch.rs` to use it, eliminating repetitive state parameter passing. Fixed potential runtime panic in `truncate_content` (`src/fetch.rs`) by replacing raw byte slicing with UTF-8 character boundary checking (`content.is_char_boundary`). Added unit test `test_content_truncation_multibyte` in `src/fetch/tests.rs` to verify Japanese/multibyte string truncation. Removed unused `_browser_state` argument from `perform_web_search` and refactored Bing search URL generation to use `reqwest::Url::parse_with_params`. Extracted `get_str_arg` and `get_usize_arg` helpers in `src/handlers.rs` to eliminate argument parsing boilerplate. Added `test_mcp_invalid_tool_error` in `tests/integration_test.rs` to verify error tool call responses. All 16 unit tests and 3 integration tests passed cleanly, and `cargo clippy --all-targets -- -D warnings` passed with 0 warnings.
+
 *   **[✅] AWU 5.10: Wire `check_secrets.sh` into a Pre-Commit Hook and CI**
     *   **Objective**: `scripts/check_secrets.sh` existed but wasn't actually run by anything -- neither at commit time nor in CI. Connect it to both.
     *   **Scope**: `.githooks/pre-commit` (new), `.github/workflows/ci.yml` (new -- no CI existed at all before this), `README.md`.

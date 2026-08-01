@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use tracing::{error, info};
 
 use crate::batch_fetch::{self, MAX_URLS};
-use crate::browser::BrowserState;
+use crate::context::AppContext;
 use crate::error::AppResult;
-use crate::fetch::{fetch_url, FetchCache, PageAction};
-use crate::search::{perform_web_search, SearchCache};
+use crate::fetch::{fetch_url, PageAction};
+use crate::search::perform_web_search;
 use crate::smart_search::perform_smart_search;
 use rust_mcp_schema::{CallToolResult, ContentBlock, ListToolsResult, TextContent, Tool, ToolInputSchema};
 
@@ -40,9 +40,7 @@ fn tool(name: &str, description: &str, input_schema: ToolInputSchema) -> Tool {
 
 /// Converts a list of `(property name, JSON Schema object)` pairs into the
 /// `BTreeMap<String, Map<String, Value>>` shape `ToolInputSchema::properties`
-/// requires. Each schema value must already be a JSON object; any that
-/// aren't are silently dropped, since these are our own hardcoded literals
-/// below, not external input -- correctness is verified by inspection/tests.
+/// requires.
 fn schema_properties(fields: &[(&str, Value)]) -> BTreeMap<String, Map<String, Value>> {
     fields
         .iter()
@@ -105,19 +103,17 @@ fn batch_fetch_tool() -> Tool {
 }
 
 pub async fn call_tool_handler(
-    browser_state: &BrowserState,
-    search_cache: &SearchCache,
-    fetch_cache: &FetchCache,
+    ctx: &AppContext,
     name: &str,
     arguments: &Value,
 ) -> AppResult<CallToolResult> {
     info!("Calling tool: {} with arguments: {:?}", name, arguments);
 
     match name {
-        "smart_search" => call_smart_search(browser_state, search_cache, fetch_cache, arguments).await,
-        "web_search" => call_web_search(browser_state, search_cache, arguments).await,
-        "web_fetch" => call_web_fetch(browser_state, fetch_cache, arguments).await,
-        "batch_fetch" => call_batch_fetch(browser_state, fetch_cache, arguments).await,
+        "smart_search" => call_smart_search(ctx, arguments).await,
+        "web_search" => call_web_search(ctx, arguments).await,
+        "web_fetch" => call_web_fetch(ctx, arguments).await,
+        "batch_fetch" => call_batch_fetch(ctx, arguments).await,
         _ => {
             error!("Unknown tool: {}", name);
             Err(anyhow::anyhow!(
@@ -136,53 +132,53 @@ fn text_result(text: String) -> CallToolResult {
     }
 }
 
-async fn call_smart_search(
-    browser_state: &BrowserState,
-    search_cache: &SearchCache,
-    fetch_cache: &FetchCache,
-    arguments: &Value,
-) -> AppResult<CallToolResult> {
-    let query = arguments
-        .get("query")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!(
-            "Missing 'query' argument in smart_search. Hint: pass a non-empty 'query' string describing what to search for."
-        ))?;
+fn get_str_arg<'a>(args: &'a Value, key: &str, tool_name: &str, hint: &str) -> AppResult<&'a str> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("Missing '{key}' argument in {tool_name}. Hint: {hint}"))
+}
 
-    let max_pages = arguments
-        .get("max_pages")
-        .and_then(serde_json::Value::as_u64)
+fn get_usize_arg(args: &Value, key: &str, default: usize, max: usize) -> usize {
+    args.get(key)
+        .and_then(Value::as_u64)
         .and_then(|v| usize::try_from(v).ok())
-        .unwrap_or(3)
-        .min(5);
+        .unwrap_or(default)
+        .min(max)
+}
 
-    let results = perform_smart_search(browser_state, search_cache, fetch_cache, query, max_pages).await?;
+async fn call_smart_search(ctx: &AppContext, arguments: &Value) -> AppResult<CallToolResult> {
+    let query = get_str_arg(
+        arguments,
+        "query",
+        "smart_search",
+        "pass a non-empty 'query' string describing what to search for.",
+    )?;
+
+    let max_pages = get_usize_arg(arguments, "max_pages", 3, 5);
+
+    let results = perform_smart_search(ctx, query, max_pages).await?;
     Ok(text_result(serde_json::to_string_pretty(&results)?))
 }
 
-async fn call_web_search(
-    browser_state: &BrowserState,
-    search_cache: &SearchCache,
-    arguments: &Value,
-) -> AppResult<CallToolResult> {
-    let query = arguments
-        .get("query")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!(
-            "Missing 'query' argument in web_search. Hint: pass a non-empty 'query' string describing what to search for."
-        ))?;
+async fn call_web_search(ctx: &AppContext, arguments: &Value) -> AppResult<CallToolResult> {
+    let query = get_str_arg(
+        arguments,
+        "query",
+        "web_search",
+        "pass a non-empty 'query' string describing what to search for.",
+    )?;
 
-    let results = perform_web_search(browser_state, search_cache, query).await?;
+    let results = perform_web_search(ctx.search_provider.as_ref(), &ctx.search_cache, query).await?;
     Ok(text_result(serde_json::to_string(&results)?))
 }
 
-async fn call_web_fetch(browser_state: &BrowserState, fetch_cache: &FetchCache, arguments: &Value) -> AppResult<CallToolResult> {
-    let url = arguments
-        .get("url")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!(
-            "Missing 'url' argument in web_fetch. Hint: pass an absolute URL including the scheme, e.g. 'https://example.com/page'."
-        ))?;
+async fn call_web_fetch(ctx: &AppContext, arguments: &Value) -> AppResult<CallToolResult> {
+    let url = get_str_arg(
+        arguments,
+        "url",
+        "web_fetch",
+        "pass an absolute URL including the scheme, e.g. 'https://example.com/page'.",
+    )?;
 
     let actions: Vec<PageAction> = match arguments.get("actions") {
         Some(value) => serde_json::from_value(value.clone()).map_err(|e| anyhow::anyhow!(
@@ -191,11 +187,11 @@ async fn call_web_fetch(browser_state: &BrowserState, fetch_cache: &FetchCache, 
         None => Vec::new(),
     };
 
-    let result = fetch_url(browser_state, fetch_cache, url, &actions).await?;
+    let result = fetch_url(&ctx.browser, &ctx.fetch_cache, url, &actions).await?;
     Ok(text_result(serde_json::to_string(&result)?))
 }
 
-async fn call_batch_fetch(browser_state: &BrowserState, fetch_cache: &FetchCache, arguments: &Value) -> AppResult<CallToolResult> {
+async fn call_batch_fetch(ctx: &AppContext, arguments: &Value) -> AppResult<CallToolResult> {
     let urls: Vec<String> = arguments
         .get("urls")
         .and_then(|v| v.as_array())
@@ -212,6 +208,6 @@ async fn call_batch_fetch(browser_state: &BrowserState, fetch_cache: &FetchCache
         ));
     }
 
-    let results = batch_fetch::fetch_many(browser_state, fetch_cache, &urls).await;
+    let results = batch_fetch::fetch_many(ctx, &urls).await;
     Ok(text_result(serde_json::to_string(&results)?))
 }

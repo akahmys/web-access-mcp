@@ -109,17 +109,18 @@ Add the following to your `mcp_config.json`:
 
 *   **Language:** Rust (for memory safety and speed)
 *   **Async Runtime:** `tokio`
-*   **Browser Automation:** `chromiumoxide` (CDP)
-*   **Search Parsing:** `quick-xml` (Bing's RSS search feed)
+*   **Browser Automation:** `chromiumoxide` (CDP with self-healing auto-restart)
+*   **Search Abstraction:** `SearchProvider` trait (pluggable search engines; default `BingSearchProvider` via `quick-xml`)
 *   **Markdown:** `html-to-markdown-rs`
 *   **Extraction:** `readabilityrs`
-*   **PDF Text Extraction:** `pdf-extract`
+*   **PDF Text Extraction:** `pdf-extract` (with 10MB download limit cap)
 *   **SSRF Protection:** `ipnet` (CIDR range checks against resolved IPs)
 *   **robots.txt:** `texting_robots`
 *   **Serialization:** `serde`
+*   **State Management:** `AppContext` (encapsulating shared browser, search provider, and TTL caches with active eviction)
 *   **Error Handling:** `thiserror` (typed domain errors carrying agent-facing hints) + `anyhow` (top-level propagation)
 *   **Networking:** `reqwest` (search HTTP requests, GitHub raw fetch, PDF download)
-*   **MCP Protocol Types:** `rust-mcp-schema` (typed request/response payloads, e.g. `InitializeResult`, `Tool`, `CallToolResult`)
+*   **MCP Protocol Types:** `rust-mcp-schema` (typed request/response payloads)
 
 ---
 

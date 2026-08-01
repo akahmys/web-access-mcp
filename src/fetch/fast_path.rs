@@ -34,13 +34,27 @@ fn get_github_raw_url(url: &str) -> Option<String> {
     }
 }
 
+const MAX_RAW_DOWNLOAD_SIZE: usize = 10 * 1024 * 1024; // 10MB
+
 async fn fetch_raw_content(url: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .context("Failed to build HTTP client")?;
     let res = client.get(url).header("User-Agent", user_agent()).send().await.context("Failed to send request")?;
+
+    if let Some(len) = res.content_length() {
+        if len > MAX_RAW_DOWNLOAD_SIZE as u64 {
+            anyhow::bail!("Raw content size ({len} bytes) exceeds maximum limit of {MAX_RAW_DOWNLOAD_SIZE} bytes");
+        }
+    }
+
     let text = res.text().await.context("Failed to read response text")?;
+
+    if text.len() > MAX_RAW_DOWNLOAD_SIZE {
+        anyhow::bail!("Raw content size exceeds maximum limit of {MAX_RAW_DOWNLOAD_SIZE} bytes");
+    }
+
     Ok(text)
 }
 

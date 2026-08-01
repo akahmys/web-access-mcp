@@ -81,17 +81,28 @@ impl BrowserState {
         Ok(browser_arc)
     }
 
-    /// Creates a new browser page/tab. The browser mutex is only held for the
-    /// brief CDP call that opens the page, not for whatever the caller does
-    /// with the returned `Page` afterwards. This lets multiple pages be
-    /// fetched concurrently instead of serializing on a single lock.
+    /// Creates a new browser page/tab. If the Chromium CDP connection has died or
+    /// crashed, this method automatically triggers a self-healing browser restart and retries.
     pub async fn new_page(&self) -> Result<Page, AppError> {
         let browser_arc = self.get_or_start_browser().await?;
-        let browser = browser_arc.lock().await;
-        browser
-            .new_page(CreateTargetParams::default())
-            .await
-            .map_err(|e| AppError::Browser(BrowserError::Runtime(e.to_string())))
+        let first_try = {
+            let browser = browser_arc.lock().await;
+            browser.new_page(CreateTargetParams::default()).await
+        };
+
+        match first_try {
+            Ok(page) => Ok(page),
+            Err(e) => {
+                warn!("Page creation failed ({e}); triggering self-healing browser restart...");
+                let _ = self.stop().await;
+                let restarted_arc = self.get_or_start_browser().await?;
+                let browser = restarted_arc.lock().await;
+                browser
+                    .new_page(CreateTargetParams::default())
+                    .await
+                    .map_err(|e2| AppError::Browser(BrowserError::Runtime(e2.to_string())))
+            }
+        }
     }
 
     pub async fn stop(&self) -> Result<(), AppError> {

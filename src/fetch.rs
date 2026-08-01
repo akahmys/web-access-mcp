@@ -197,7 +197,13 @@ pub fn truncate_content(content: &str, max_len: usize) -> String {
         return content.to_string();
     }
 
-    let truncated = &content[..max_len];
+    // Find the largest valid byte index <= max_len that falls on a char boundary
+    let mut safe_len = max_len;
+    while safe_len > 0 && !content.is_char_boundary(safe_len) {
+        safe_len -= 1;
+    }
+
+    let truncated = &content[..safe_len];
     let last_newline = truncated.rfind('\n').unwrap_or(0);
 
     if last_newline > max_len / 2 {

@@ -11,14 +11,15 @@ mod batch_fetch;
 mod handlers;
 mod cache;
 mod user_agent;
+mod context;
 
 use tracing::{info, error};
 use error::AppResult;
+use crate::context::AppContext;
 use crate::mcp::{
     JsonRpcMessage, JsonRpcRequest, JsonRpcResponse, JsonRpcError, ErrorDetails,
 };
 use crate::transport::StdioTransport;
-use crate::browser::BrowserState;
 use crate::handlers::{call_tool_handler, list_tools_handler};
 use rust_mcp_schema::{
     CallToolRequestParams, CallToolResult, ContentBlock, Implementation, InitializeResult,
@@ -26,8 +27,6 @@ use rust_mcp_schema::{
 };
 use serde_json::{json, Value};
 use std::time::Duration;
-use crate::search::SearchCache;
-use crate::fetch::FetchCache;
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
@@ -51,19 +50,18 @@ async fn main() -> AppResult<()> {
 async fn run() -> AppResult<()> {
     info!("Running core logic...");
     let mut transport = StdioTransport::new();
-    let browser_state = BrowserState::new();
-    let search_cache = SearchCache::new(Duration::from_hours(1));
-    let fetch_cache = FetchCache::new(Duration::from_mins(10));
+    let ctx = AppContext::new(Duration::from_hours(1), Duration::from_mins(10));
 
     while let Some(message) = transport.read_message().await? {
-        if let Err(e) = handle_message(&mut transport, &browser_state, &search_cache, &fetch_cache, message).await {
+        ctx.evict_expired_caches();
+        if let Err(e) = handle_message(&mut transport, &ctx, message).await {
             error!("Error handling message: {:?}", e);
             break;
         }
     }
 
     // Graceful shutdown
-    if let Err(e) = browser_state.stop().await {
+    if let Err(e) = ctx.browser.stop().await {
         error!("Error stopping browser: {:?}", e);
     }
 
@@ -72,9 +70,7 @@ async fn run() -> AppResult<()> {
 
 async fn handle_message(
     transport: &mut StdioTransport,
-    browser_state: &BrowserState,
-    search_cache: &SearchCache,
-    fetch_cache: &FetchCache,
+    ctx: &AppContext,
     message: JsonRpcMessage,
 ) -> AppResult<()> {
     let req = match message {
@@ -97,7 +93,7 @@ async fn handle_message(
         "initialize" => handle_initialize(transport, req.id).await,
         "ping" => handle_ping(transport, req.id).await,
         "tools/list" | "list_tools" => handle_tools_list(transport, req.id).await,
-        "tools/call" | "call_tool" => handle_tools_call(transport, browser_state, search_cache, fetch_cache, req).await,
+        "tools/call" | "call_tool" => handle_tools_call(transport, ctx, req).await,
         _ => handle_unknown_method(transport, &req.method, req.id).await,
     }
 }
@@ -150,16 +146,14 @@ async fn handle_tools_list(transport: &mut StdioTransport, id: Value) -> AppResu
 
 async fn handle_tools_call(
     transport: &mut StdioTransport,
-    browser_state: &BrowserState,
-    search_cache: &SearchCache,
-    fetch_cache: &FetchCache,
+    ctx: &AppContext,
     req: JsonRpcRequest,
 ) -> AppResult<()> {
     let call_result: AppResult<CallToolResult> = match &req.params {
         Some(params) => match serde_json::from_value::<CallToolRequestParams>(params.clone()) {
             Ok(call_req) => {
                 let arguments = Value::Object(call_req.arguments.unwrap_or_default());
-                call_tool_handler(browser_state, search_cache, fetch_cache, &call_req.name, &arguments).await
+                call_tool_handler(ctx, &call_req.name, &arguments).await
             }
             Err(e) => Err(anyhow::anyhow!(
                 "Invalid CallToolRequest: {e}. Hint: 'arguments' must be a JSON object matching the target tool's inputSchema (see tools/list) -- check for missing fields or wrong types."

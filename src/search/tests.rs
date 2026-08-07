@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn test_search_cache_ttl() {
-    let cache = SearchCache::new(Duration::from_millis(50));
+    let cache = SearchCache::new(Duration::from_millis(50), 10);
     let results = vec![SearchResult {
         title: "Test".to_string(),
         url: "https://example.com".to_string(),

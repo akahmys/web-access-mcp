@@ -37,10 +37,9 @@ pub(super) async fn run_actions(page: &Page, actions: &[PageAction]) -> Result<(
 async fn apply_one(page: &Page, action: &PageAction) -> Result<(), FetchError> {
     match action {
         PageAction::Click { selector } => {
-            let element = page
-                .find_element(selector.as_str())
-                .await
-                .map_err(|e| FetchError::ActionFailed(format!("click '{selector}': no matching element ({e})")))?;
+            let element = page.find_element(selector.as_str()).await.map_err(|e| {
+                FetchError::ActionFailed(format!("click '{selector}': no matching element ({e})"))
+            })?;
             element
                 .click()
                 .await
@@ -51,7 +50,9 @@ async fn apply_one(page: &Page, action: &PageAction) -> Result<(), FetchError> {
                 ScrollTarget::Top => "window.scrollTo(0, 0)",
                 ScrollTarget::Bottom => "window.scrollTo(0, document.body.scrollHeight)",
             };
-            page.evaluate(script).await.map_err(|e| FetchError::ActionFailed(format!("scroll: {e}")))?;
+            page.evaluate(script)
+                .await
+                .map_err(|e| FetchError::ActionFailed(format!("scroll: {e}")))?;
         }
     }
     Ok(())

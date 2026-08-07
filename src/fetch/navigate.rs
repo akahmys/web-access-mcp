@@ -8,7 +8,10 @@ use std::time::Duration;
 /// failures that look transient (timeout, navigation, or page-creation
 /// errors) -- but not on failures where retrying the identical request
 /// is known to be pointless, like a CAPTCHA block.
-pub(super) async fn open_and_load_page_with_retry(browser_state: &BrowserState, url: &str) -> Result<Page, FetchError> {
+pub(super) async fn open_and_load_page_with_retry(
+    browser_state: &BrowserState,
+    url: &str,
+) -> Result<Page, FetchError> {
     match open_and_load_page(browser_state, url).await {
         Err(FetchError::Timeout(_) | FetchError::Navigation(_) | FetchError::PageCreation(_)) => {
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -32,9 +35,12 @@ async fn open_and_load_page(browser_state: &BrowserState, url: &str) -> Result<P
     let page_load_timeout = Duration::from_secs(15);
     let nav_result = tokio::time::timeout(page_load_timeout, async {
         page.goto(url).await.context("Failed to navigate to URL")?;
-        wait_for_page_load(&page).await.context("Failed to wait for page load")?;
+        wait_for_page_load(&page)
+            .await
+            .context("Failed to wait for page load")?;
         anyhow::Ok(())
-    }).await;
+    })
+    .await;
 
     match nav_result {
         Err(_) => Err(FetchError::Timeout(page_load_timeout.as_secs())),
@@ -50,7 +56,9 @@ async fn wait_for_page_load(page: &Page) -> anyhow::Result<()> {
 
 /// Waits for `document.readyState` to become 'complete'.
 async fn wait_for_document_ready(page: &Page) -> anyhow::Result<()> {
-    let _ = page.evaluate(r"
+    let _ = page
+        .evaluate(
+            r"
         () => {
             return new Promise((resolve) => {
                 if (document.readyState === 'complete') {
@@ -60,7 +68,10 @@ async fn wait_for_document_ready(page: &Page) -> anyhow::Result<()> {
                 }
             });
         }
-    ").await.context("Failed to evaluate load script")?;
+    ",
+        )
+        .await
+        .context("Failed to evaluate load script")?;
     Ok(())
 }
 

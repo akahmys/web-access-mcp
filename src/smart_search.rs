@@ -31,9 +31,13 @@ pub async fn perform_smart_search(
     query: &str,
     max_pages: usize,
 ) -> Result<SmartSearchResult> {
-    info!("Performing smart_search for query: '{}' (max_pages: {})", query, max_pages);
+    info!(
+        "Performing smart_search for query: '{}' (max_pages: {})",
+        query, max_pages
+    );
 
-    let search_results = perform_web_search(ctx.search_provider.as_ref(), &ctx.search_cache, query).await?;
+    let search_results =
+        perform_web_search(ctx.search_provider.as_ref(), &ctx.search_cache, query).await?;
     let total_found = search_results.len();
 
     let target_items: Vec<_> = search_results.into_iter().take(max_pages).collect();
@@ -62,7 +66,18 @@ pub async fn perform_smart_search(
 /// with a hint instead of `content`, so one bad page doesn't fail the
 /// whole `smart_search` call.
 async fn fetch_one_item(ctx: &AppContext, item: SearchResult) -> SmartSearchItem {
-    let SearchResult { title, url, snippet } = item;
-    let (content, error) = fetch_content_or_error(&ctx.browser, &ctx.fetch_cache, &url, PER_ITEM_CONTENT_LIMIT).await;
-    SmartSearchItem { title, url, snippet, content, error }
+    let SearchResult {
+        title,
+        url,
+        snippet,
+    } = item;
+    let (content, error) =
+        fetch_content_or_error(&ctx.browser, &ctx.fetch_cache, &url, PER_ITEM_CONTENT_LIMIT).await;
+    SmartSearchItem {
+        title,
+        url,
+        snippet,
+        content,
+        error,
+    }
 }

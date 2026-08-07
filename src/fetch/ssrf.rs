@@ -20,7 +20,9 @@ pub(super) async fn validate_public_url(url: &str) -> Result<(), FetchError> {
         )));
     }
 
-    let host = parsed.host_str().ok_or_else(|| FetchError::InvalidUrl("URL has no host".to_string()))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| FetchError::InvalidUrl("URL has no host".to_string()))?;
     let port = parsed.port_or_known_default().unwrap_or(443);
 
     let addrs: Vec<IpAddr> = tokio::net::lookup_host((host, port))
@@ -30,11 +32,15 @@ pub(super) async fn validate_public_url(url: &str) -> Result<(), FetchError> {
         .collect();
 
     if addrs.is_empty() {
-        return Err(FetchError::InvalidUrl(format!("host '{host}' did not resolve to any address")));
+        return Err(FetchError::InvalidUrl(format!(
+            "host '{host}' did not resolve to any address"
+        )));
     }
 
     if let Some(ip) = addrs.into_iter().find(|ip| is_blocked(*ip)) {
-        return Err(FetchError::SsrfBlocked(format!("{host} resolves to non-public address {ip}")));
+        return Err(FetchError::SsrfBlocked(format!(
+            "{host} resolves to non-public address {ip}"
+        )));
     }
 
     Ok(())
@@ -43,7 +49,10 @@ pub(super) async fn validate_public_url(url: &str) -> Result<(), FetchError> {
 fn is_blocked(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => is_blocked_v4(v4),
-        IpAddr::V6(v6) => v6.to_ipv4_mapped().is_some_and(is_blocked_v4) || blocked_ipv6_nets().iter().any(|net| net.contains(&v6)),
+        IpAddr::V6(v6) => {
+            v6.to_ipv4_mapped().is_some_and(is_blocked_v4)
+                || blocked_ipv6_nets().iter().any(|net| net.contains(&v6))
+        }
     }
 }
 

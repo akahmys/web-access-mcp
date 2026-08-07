@@ -1,0 +1,43 @@
+# Betterleaks configuration for web-access-mcp
+
+title = "web-access-mcp security rules"
+
+[allowlist]
+description = "Global allowlist for files that contain rule definitions or git metadata"
+paths = [
+    '''^\.betterleaks\.toml$''',
+    '''^\.git/''',
+]
+
+[[rules]]
+id = "users-absolute-path"
+description = "Detect absolute path containing /Users/"
+regex = '''/Users/[a-zA-Z0-9_-]+'''
+[rules.allowlist]
+paths = [
+    '''^\.agents/''',
+    '''\.md$''',
+    '''.*test.*\.rs$''',
+]
+
+[[rules]]
+id = "home-absolute-path"
+description = "Detect absolute path containing /home/"
+regex = '''/home/[a-zA-Z0-9_-]+'''
+[rules.allowlist]
+paths = [
+    '''^\.agents/''',
+    '''\.md$''',
+    '''.*test.*\.rs$''',
+]
+
+[[rules]]
+id = "personal-name-jun-kato"
+description = "Detect personal name"
+regex = '''(?i)jun\s+kato'''
+[rules.allowlist]
+paths = [
+    '''^\.agents/''',
+    '''\.md$''',
+    '''^\.betterleaks\.toml$''',
+]

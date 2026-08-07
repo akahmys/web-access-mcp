@@ -1,19 +1,32 @@
+use crate::error::{AppError, BrowserError};
+use crate::user_agent::random_user_agent;
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
 use chromiumoxide::page::Page;
-use std::sync::Arc;
+use futures_util::StreamExt;
 use std::env;
 use std::path::PathBuf;
-use tokio::sync::{RwLock, Mutex};
-use crate::error::{AppError, BrowserError};
-use crate::user_agent::user_agent;
-use futures_util::StreamExt;
+use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock, Semaphore};
 use tracing::{info, warn};
 
-#[derive(Clone, Default)]
+const MAX_CONCURRENT_PAGES: usize = 5;
+
+#[derive(Clone)]
 pub struct BrowserState {
     browser: Arc<RwLock<Option<Arc<Mutex<Browser>>>>>,
     user_data_dir: Arc<RwLock<Option<PathBuf>>>,
+    semaphore: Arc<Semaphore>,
+}
+
+impl Default for BrowserState {
+    fn default() -> Self {
+        Self {
+            browser: Arc::default(),
+            user_data_dir: Arc::default(),
+            semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_PAGES)),
+        }
+    }
 }
 
 impl BrowserState {
@@ -36,12 +49,13 @@ impl BrowserState {
             return Ok(Arc::clone(b));
         }
 
+        let ua = random_user_agent();
         let user_data_dir = env::temp_dir().join(format!("web-access-mcp-{}", std::process::id()));
         let mut builder = BrowserConfig::builder()
             .arg("--no-sandbox")
             .arg("--disable-dev-shm-usage")
             .arg("--disable-gpu")
-            .arg(format!("--user-agent={}", user_agent()))
+            .arg(format!("--user-agent={ua}"))
             .user_data_dir(&user_data_dir);
 
         if let Ok(chrome_path) = env::var("CHROME_PATH") {
@@ -61,12 +75,10 @@ impl BrowserState {
             .build()
             .map_err(|e| BrowserError::Launch(e.clone()))?;
 
-        let (browser, mut handler) = Browser::launch(config)
-            .await
-            .map_err(|e| {
-                warn!("Failed to launch browser: {}", e);
-                BrowserError::Launch(e.to_string())
-            })?;
+        let (browser, mut handler) = Browser::launch(config).await.map_err(|e| {
+            warn!("Failed to launch browser: {}", e);
+            BrowserError::Launch(e.to_string())
+        })?;
 
         tokio::spawn(async move {
             while let Some(_event) = handler.next().await {
@@ -77,13 +89,20 @@ impl BrowserState {
         let browser_arc = Arc::new(Mutex::new(browser));
         *lock = Some(Arc::clone(&browser_arc));
         *self.user_data_dir.write().await = Some(user_data_dir);
-        info!("Chromium browser initialized successfully.");
+        info!("Chromium browser initialized successfully with User-Agent: {ua}");
         Ok(browser_arc)
     }
 
-    /// Creates a new browser page/tab. If the Chromium CDP connection has died or
-    /// crashed, this method automatically triggers a self-healing browser restart and retries.
+    /// Creates a new browser page/tab under a semaphore concurrency limit.
+    /// If the Chromium CDP connection has died or crashed, this method
+    /// automatically triggers a self-healing browser restart and retries.
     pub async fn new_page(&self) -> Result<Page, AppError> {
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|e| AppError::Browser(BrowserError::Runtime(e.to_string())))?;
+
         let browser_arc = self.get_or_start_browser().await?;
         let first_try = {
             let browser = browser_arc.lock().await;
@@ -109,7 +128,10 @@ impl BrowserState {
         let mut lock = self.browser.write().await;
         if let Some(browser_mutex_arc) = lock.take() {
             let mut browser = browser_mutex_arc.lock().await;
-            browser.close().await.map_err(|e| AppError::Browser(BrowserError::Runtime(e.to_string())))?;
+            browser
+                .close()
+                .await
+                .map_err(|e| AppError::Browser(BrowserError::Runtime(e.to_string())))?;
         }
         drop(lock);
 

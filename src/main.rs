@@ -1,32 +1,30 @@
 #![deny(clippy::pedantic)]
 
-mod fetch;
-mod error;
-mod mcp;
-mod transport;
+mod batch_fetch;
 mod browser;
+mod cache;
+mod context;
+mod error;
+mod fetch;
+mod handlers;
+mod mcp;
 mod search;
 mod smart_search;
-mod batch_fetch;
-mod handlers;
-mod cache;
+mod transport;
 mod user_agent;
-mod context;
 
-use tracing::{info, error};
-use error::AppResult;
 use crate::context::AppContext;
-use crate::mcp::{
-    JsonRpcMessage, JsonRpcRequest, JsonRpcResponse, JsonRpcError, ErrorDetails,
-};
-use crate::transport::StdioTransport;
 use crate::handlers::{call_tool_handler, list_tools_handler};
+use crate::mcp::{ErrorDetails, JsonRpcError, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse};
+use crate::transport::StdioTransport;
+use error::AppResult;
 use rust_mcp_schema::{
     CallToolRequestParams, CallToolResult, ContentBlock, Implementation, InitializeResult,
     ProtocolVersion, ServerCapabilities, ServerCapabilitiesTools, TextContent,
 };
 use serde_json::{json, Value};
 use std::time::Duration;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
@@ -50,7 +48,8 @@ async fn main() -> AppResult<()> {
 async fn run() -> AppResult<()> {
     info!("Running core logic...");
     let mut transport = StdioTransport::new();
-    let ctx = AppContext::new(Duration::from_hours(1), Duration::from_mins(10));
+    #[allow(clippy::duration_suboptimal_units)]
+    let ctx = AppContext::new(Duration::from_secs(60 * 60), Duration::from_secs(10 * 60));
 
     while let Some(message) = transport.read_message().await? {
         ctx.evict_expired_caches();
@@ -111,7 +110,9 @@ async fn write_response<T: serde::Serialize>(
         result: serde_json::to_value(result)?,
         id,
     };
-    transport.write_message(&JsonRpcMessage::Response(response)).await
+    transport
+        .write_message(&JsonRpcMessage::Response(response))
+        .await
 }
 
 async fn handle_initialize(transport: &mut StdioTransport, id: Value) -> AppResult<()> {
@@ -120,7 +121,14 @@ async fn handle_initialize(transport: &mut StdioTransport, id: Value) -> AppResu
             tools: Some(ServerCapabilitiesTools { list_changed: None }),
             ..Default::default()
         },
-        instructions: None,
+        instructions: Some(
+            "web-access-mcp provides web search and Markdown content extraction tools: \
+             1. Use 'smart_search' when you need to search and fetch content from top result pages in a single call. \
+             2. Use 'web_search' when you only need search result links and snippets without fetching page bodies. \
+             3. Use 'web_fetch' when you have a single specific URL to extract Markdown from (supports optional click/scroll actions). \
+             4. Use 'batch_fetch' when you have a list of URLs to fetch concurrently without searching first."
+                .to_string(),
+        ),
         meta: None,
         protocol_version: ProtocolVersion::latest().to_string(),
         server_info: Implementation {
@@ -178,14 +186,22 @@ async fn handle_tools_call(
 fn error_to_call_result(e: &anyhow::Error) -> CallToolResult {
     error!("CallTool error: {:?}", e);
     CallToolResult {
-        content: vec![ContentBlock::TextContent(TextContent::new(format!("{e:#}"), None, None))],
+        content: vec![ContentBlock::TextContent(TextContent::new(
+            format!("{e:#}"),
+            None,
+            None,
+        ))],
         is_error: Some(true),
         meta: None,
         structured_content: None,
     }
 }
 
-async fn handle_unknown_method(transport: &mut StdioTransport, method: &str, id: Value) -> AppResult<()> {
+async fn handle_unknown_method(
+    transport: &mut StdioTransport,
+    method: &str,
+    id: Value,
+) -> AppResult<()> {
     error!("Unknown method: {}", method);
     let response = JsonRpcError {
         jsonrpc: "2.0".to_string(),
@@ -196,5 +212,7 @@ async fn handle_unknown_method(transport: &mut StdioTransport, method: &str, id:
         },
         id,
     };
-    transport.write_message(&JsonRpcMessage::Error(response)).await
+    transport
+        .write_message(&JsonRpcMessage::Error(response))
+        .await
 }

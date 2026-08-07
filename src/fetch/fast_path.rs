@@ -16,7 +16,9 @@ pub(super) async fn try_fast_path(url: &str) -> Result<Option<WebFetchResult>, F
                 }));
             }
             Err(e) => {
-                eprintln!("Warning: Failed to fetch GitHub raw content: {e}. Falling back to browser.");
+                eprintln!(
+                    "Warning: Failed to fetch GitHub raw content: {e}. Falling back to browser."
+                );
             }
         }
     }
@@ -26,7 +28,9 @@ pub(super) async fn try_fast_path(url: &str) -> Result<Option<WebFetchResult>, F
 
 fn get_github_raw_url(url: &str) -> Option<String> {
     if url.contains("github.com") && url.contains("/blob/") {
-        let mut raw_url = url.to_string().replace("github.com", "raw.githubusercontent.com");
+        let mut raw_url = url
+            .to_string()
+            .replace("github.com", "raw.githubusercontent.com");
         raw_url = raw_url.replace("/blob/", "/");
         Some(raw_url)
     } else {
@@ -41,7 +45,12 @@ async fn fetch_raw_content(url: &str) -> anyhow::Result<String> {
         .timeout(Duration::from_secs(15))
         .build()
         .context("Failed to build HTTP client")?;
-    let res = client.get(url).header("User-Agent", user_agent()).send().await.context("Failed to send request")?;
+    let res = client
+        .get(url)
+        .header("User-Agent", user_agent())
+        .send()
+        .await
+        .context("Failed to send request")?;
 
     if let Some(len) = res.content_length() {
         if len > MAX_RAW_DOWNLOAD_SIZE as u64 {

@@ -15,13 +15,15 @@ pub struct AppContext {
     pub fetch_cache: FetchCache,
 }
 
+const MAX_CACHE_ENTRIES: usize = 500;
+
 impl AppContext {
     pub fn new(search_ttl: Duration, fetch_ttl: Duration) -> Self {
         Self {
             browser: BrowserState::new(),
             search_provider: Arc::new(BingSearchProvider),
-            search_cache: SearchCache::new(search_ttl),
-            fetch_cache: FetchCache::new(fetch_ttl),
+            search_cache: SearchCache::new(search_ttl, MAX_CACHE_ENTRIES),
+            fetch_cache: FetchCache::new(fetch_ttl, MAX_CACHE_ENTRIES),
         }
     }
 

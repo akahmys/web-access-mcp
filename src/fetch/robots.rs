@@ -38,8 +38,16 @@ pub(super) async fn check_robots_txt(url: &str) -> Result<(), FetchError> {
 /// treats it as "no restrictions" rather than propagating an error.
 async fn fetch_robots_txt(url: &str) -> Option<Vec<u8>> {
     let robots_url = get_robots_url(url).ok()?;
-    let client = reqwest::Client::builder().timeout(ROBOTS_FETCH_TIMEOUT).build().ok()?;
-    let response = client.get(&robots_url).header("User-Agent", user_agent()).send().await.ok()?;
+    let client = reqwest::Client::builder()
+        .timeout(ROBOTS_FETCH_TIMEOUT)
+        .build()
+        .ok()?;
+    let response = client
+        .get(&robots_url)
+        .header("User-Agent", user_agent())
+        .send()
+        .await
+        .ok()?;
 
     if !response.status().is_success() {
         return None;

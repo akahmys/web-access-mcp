@@ -8,7 +8,9 @@ use crate::error::AppResult;
 use crate::fetch::{fetch_url, PageAction};
 use crate::search::perform_web_search;
 use crate::smart_search::perform_smart_search;
-use rust_mcp_schema::{CallToolResult, ContentBlock, ListToolsResult, TextContent, Tool, ToolInputSchema};
+use rust_mcp_schema::{
+    CallToolResult, ContentBlock, ListToolsResult, TextContent, Tool, ToolInputSchema,
+};
 
 pub async fn list_tools_handler() -> AppResult<ListToolsResult> {
     let tools = vec![
@@ -18,7 +20,11 @@ pub async fn list_tools_handler() -> AppResult<ListToolsResult> {
         batch_fetch_tool(),
     ];
 
-    Ok(ListToolsResult { meta: None, next_cursor: None, tools })
+    Ok(ListToolsResult {
+        meta: None,
+        next_cursor: None,
+        tools,
+    })
 }
 
 /// Builds a `Tool` from just the parts that vary per tool, filling in the
@@ -44,7 +50,11 @@ fn tool(name: &str, description: &str, input_schema: ToolInputSchema) -> Tool {
 fn schema_properties(fields: &[(&str, Value)]) -> BTreeMap<String, Map<String, Value>> {
     fields
         .iter()
-        .filter_map(|(name, schema)| schema.as_object().map(|obj| ((*name).to_string(), obj.clone())))
+        .filter_map(|(name, schema)| {
+            schema
+                .as_object()
+                .map(|obj| ((*name).to_string(), obj.clone()))
+        })
         .collect()
 }
 
@@ -52,8 +62,14 @@ fn smart_search_tool() -> Tool {
     let input_schema = ToolInputSchema::new(
         vec!["query".to_string()],
         Some(schema_properties(&[
-            ("query", json!({ "type": "string", "description": "The search query" })),
-            ("max_pages", json!({ "type": "integer", "description": "Number of top pages to fetch content from (default: 3, max: 5)" })),
+            (
+                "query",
+                json!({ "type": "string", "description": "The search query" }),
+            ),
+            (
+                "max_pages",
+                json!({ "type": "integer", "description": "Number of top pages to fetch content from (default: 3, max: 5)" }),
+            ),
         ])),
         None,
     );
@@ -70,7 +86,11 @@ fn web_search_tool() -> Tool {
         Some(schema_properties(&[("query", json!({ "type": "string" }))])),
         None,
     );
-    tool("web_search", "Search the web (Bing) and return raw search result snippets", input_schema)
+    tool(
+        "web_search",
+        "Search the web (Bing) and return raw search result snippets",
+        input_schema,
+    )
 }
 
 fn web_fetch_tool() -> Tool {
@@ -79,11 +99,18 @@ fn web_fetch_tool() -> Tool {
         vec!["url".to_string()],
         Some(schema_properties(&[
             ("url", json!({ "type": "string" })),
-            ("actions", json!({ "type": "array", "description": actions_description, "items": { "type": "object" } })),
+            (
+                "actions",
+                json!({ "type": "array", "description": actions_description, "items": { "type": "object" } }),
+            ),
         ])),
         None,
     );
-    tool("web_fetch", "Fetch content from a single URL and convert to Markdown", input_schema)
+    tool(
+        "web_fetch",
+        "Fetch content from a single URL and convert to Markdown",
+        input_schema,
+    )
 }
 
 fn batch_fetch_tool() -> Tool {
@@ -125,7 +152,9 @@ pub async fn call_tool_handler(
 
 fn text_result(text: String) -> CallToolResult {
     CallToolResult {
-        content: vec![ContentBlock::TextContent(TextContent::new(text, None, None))],
+        content: vec![ContentBlock::TextContent(TextContent::new(
+            text, None, None,
+        ))],
         is_error: Some(false),
         meta: None,
         structured_content: None,
@@ -168,7 +197,8 @@ async fn call_web_search(ctx: &AppContext, arguments: &Value) -> AppResult<CallT
         "pass a non-empty 'query' string describing what to search for.",
     )?;
 
-    let results = perform_web_search(ctx.search_provider.as_ref(), &ctx.search_cache, query).await?;
+    let results =
+        perform_web_search(ctx.search_provider.as_ref(), &ctx.search_cache, query).await?;
     Ok(text_result(serde_json::to_string(&results)?))
 }
 

@@ -15,7 +15,10 @@ pub async fn fetch_content_or_error(
         Ok(res) => (Some(truncate_content(&res.content, max_len)), None),
         Err(e) => {
             tracing::warn!("Failed to fetch content for {}: {}", url, e);
-            (None, Some(format!("Content unavailable for this result: {e}")))
+            (
+                None,
+                Some(format!("Content unavailable for this result: {e}")),
+            )
         }
     }
 }

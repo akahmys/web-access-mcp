@@ -45,7 +45,8 @@ pub(super) async fn try_fetch_pdf(url: &str) -> Result<Option<WebFetchResult>, F
         )));
     }
 
-    let text = pdf_extract::extract_text_from_mem(&bytes).map_err(|e| FetchError::PdfExtraction(e.to_string()))?;
+    let text = pdf_extract::extract_text_from_mem(&bytes)
+        .map_err(|e| FetchError::PdfExtraction(e.to_string()))?;
 
     Ok(Some(WebFetchResult {
         title: format!("PDF: {url}"),

@@ -28,6 +28,11 @@ pub async fn fetch_many(ctx: &AppContext, urls: &[String]) -> Vec<BatchFetchItem
 }
 
 async fn fetch_one(ctx: &AppContext, url: String) -> BatchFetchItem {
-    let (content, error) = fetch_content_or_error(&ctx.browser, &ctx.fetch_cache, &url, PER_ITEM_CONTENT_LIMIT).await;
-    BatchFetchItem { url, content, error }
+    let (content, error) =
+        fetch_content_or_error(&ctx.browser, &ctx.fetch_cache, &url, PER_ITEM_CONTENT_LIMIT).await;
+    BatchFetchItem {
+        url,
+        content,
+        error,
+    }
 }

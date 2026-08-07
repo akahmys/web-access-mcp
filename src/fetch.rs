@@ -1,8 +1,8 @@
-use chromiumoxide::page::Page;
 use crate::browser::BrowserState;
 use crate::cache::TtlCache;
-use readabilityrs::Readability;
+use chromiumoxide::page::Page;
 use html_to_markdown_rs::convert;
+use readabilityrs::Readability;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -25,8 +25,8 @@ mod multi;
 pub use multi::fetch_content_or_error;
 
 mod actions;
-pub use actions::PageAction;
 use actions::run_actions;
+pub use actions::PageAction;
 
 const MAX_CONTENT_LENGTH: usize = 10000;
 
@@ -60,17 +60,10 @@ pub enum FetchError {
     #[error("Access to the page was blocked by Cloudflare or CAPTCHA protection. Hint: don't retry this exact URL, it will likely block again -- use web_search or smart_search to find an alternative source, or ask the user for a different link.")]
     Blocked,
 
-    #[error("Failed to get title: {0}. Hint: transient browser error -- retry the web_fetch call once.")]
+    #[error(
+        "Failed to get title: {0}. Hint: transient browser error -- retry the web_fetch call once."
+    )]
     Title(String),
-
-    #[error("Readability initialization error: {0}. Hint: the page's HTML could not be parsed -- retry once; if it persists, this URL isn't supported by web_fetch.")]
-    ReadabilityInit(String),
-
-    #[error("Readability failed to parse the HTML content. Hint: this page likely isn't a plain article (e.g. an app-like SPA, login wall, or mostly non-text UI) -- try a different URL, or ask the user for the specific content needed.")]
-    ReadabilityParse,
-
-    #[error("Readability extracted content is empty. Hint: the page has no identifiable main content (may require login or JavaScript interaction) -- try a different URL.")]
-    EmptyArticle,
 
     #[error("Markdown conversion error: {0}. Hint: internal conversion issue -- retry once; if it persists, this page's content can't be converted by web_fetch.")]
     MarkdownConversion(String),
@@ -121,7 +114,11 @@ pub async fn fetch_url(
     Ok(result)
 }
 
-async fn fetch_url_uncached(browser_state: &BrowserState, url: &str, actions: &[PageAction]) -> Result<WebFetchResult, FetchError> {
+async fn fetch_url_uncached(
+    browser_state: &BrowserState,
+    url: &str,
+    actions: &[PageAction],
+) -> Result<WebFetchResult, FetchError> {
     // 0. Reject URLs that resolve to loopback/private/link-local/metadata
     // addresses before making any request against them, closing off
     // web_fetch as an SSRF vector into the host's internal network.
@@ -142,9 +139,18 @@ async fn fetch_url_uncached(browser_state: &BrowserState, url: &str, actions: &[
 
     // 2. Fallback to Chromium-based browser.
     let page = open_and_load_page_with_retry(browser_state, url).await?;
-    run_actions(&page, actions).await?;
-    let html_content = get_verified_html(&page).await?;
-    let title = get_page_title(&page).await?;
+    let res = extract_from_page(&page, actions).await;
+    let _ = page.close().await;
+    res
+}
+
+async fn extract_from_page(
+    page: &Page,
+    actions: &[PageAction],
+) -> Result<WebFetchResult, FetchError> {
+    run_actions(page, actions).await?;
+    let html_content = get_verified_html(page).await?;
+    let title = get_page_title(page).await?;
 
     let markdown_content = html_to_markdown(&html_content)?;
     let content = truncate_content(&markdown_content, MAX_CONTENT_LENGTH);
@@ -154,7 +160,10 @@ async fn fetch_url_uncached(browser_state: &BrowserState, url: &str, actions: &[
 
 /// Fetches the page's rendered HTML and rejects known CAPTCHA/block pages.
 async fn get_verified_html(page: &Page) -> Result<String, FetchError> {
-    let html_content = page.content().await.map_err(|e| FetchError::PageContent(e.to_string()))?;
+    let html_content = page
+        .content()
+        .await
+        .map_err(|e| FetchError::PageContent(e.to_string()))?;
 
     if html_content.contains("cf-challenge")
         || html_content.contains("g-recaptcha")
@@ -177,19 +186,33 @@ async fn get_page_title(page: &Page) -> Result<String, FetchError> {
 }
 
 fn html_to_markdown(html_content: &str) -> Result<String, FetchError> {
-    let readability = Readability::new(html_content, None, None)
-        .map_err(|e| FetchError::ReadabilityInit(e.to_string()))?;
+    // 1. Try Readability main article extraction
+    if let Ok(readability) = Readability::new(html_content, None, None) {
+        if let Some(article) = readability.parse() {
+            if let Some(clean_html) = article.content {
+                if let Ok(conversion_result) = convert(&clean_html, None) {
+                    if let Some(markdown) = conversion_result.content {
+                        let trimmed = markdown.trim().to_string();
+                        if !trimmed.is_empty() {
+                            return Ok(trimmed);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-    let article = readability.parse().ok_or(FetchError::ReadabilityParse)?;
-
-    let clean_html = article.content.ok_or(FetchError::EmptyArticle)?;
-
-    let conversion_result = convert(&clean_html, None)
-        .map_err(|e| FetchError::MarkdownConversion(e.to_string()))?;
+    // 2. Fallback: Convert raw HTML directly if Readability fails or produces empty article
+    let conversion_result =
+        convert(html_content, None).map_err(|e| FetchError::MarkdownConversion(e.to_string()))?;
 
     let markdown = conversion_result.content.ok_or(FetchError::EmptyMarkdown)?;
+    let trimmed = markdown.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(FetchError::EmptyMarkdown);
+    }
 
-    Ok(markdown.trim().to_string())
+    Ok(trimmed)
 }
 
 pub fn truncate_content(content: &str, max_len: usize) -> String {

@@ -1,7 +1,7 @@
 #![deny(clippy::pedantic)]
 
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
-use std::io::{Write, BufReader, BufRead};
 
 #[test]
 fn test_mcp_list_tools() {
@@ -10,7 +10,7 @@ fn test_mcp_list_tools() {
         .arg("build")
         .status()
         .expect("Failed to run cargo build");
-    
+
     assert!(build_status.success(), "Failed to compile project");
 
     // 2. Spawn the compiled binary
@@ -30,12 +30,23 @@ fn test_mcp_list_tools() {
     // 4. Read the response
     let mut reader = BufReader::new(stdout);
     let mut response = String::new();
-    reader.read_line(&mut response).expect("Failed to read line from stdout");
+    reader
+        .read_line(&mut response)
+        .expect("Failed to read line from stdout");
 
     // 5. Verify the response contains expected tools
-    assert!(response.contains("tools"), "Response does not contain tools structure");
-    assert!(response.contains("web_search"), "Response does not contain web_search tool");
-    assert!(response.contains("web_fetch"), "Response does not contain web_fetch tool");
+    assert!(
+        response.contains("tools"),
+        "Response does not contain tools structure"
+    );
+    assert!(
+        response.contains("web_search"),
+        "Response does not contain web_search tool"
+    );
+    assert!(
+        response.contains("web_fetch"),
+        "Response does not contain web_fetch tool"
+    );
 
     // Clean up
     let _ = child.kill();
@@ -59,18 +70,34 @@ fn test_mcp_standard_flow() {
     writeln!(stdin, "{init_request}").expect("Failed to write initialize request");
 
     let mut init_response = String::new();
-    reader.read_line(&mut init_response).expect("Failed to read initialize response");
-    assert!(init_response.contains("protocolVersion"), "Initialize response missing protocolVersion");
-    assert!(init_response.contains("web-access-mcp"), "Initialize response missing serverInfo name");
+    reader
+        .read_line(&mut init_response)
+        .expect("Failed to read initialize response");
+    assert!(
+        init_response.contains("protocolVersion"),
+        "Initialize response missing protocolVersion"
+    );
+    assert!(
+        init_response.contains("web-access-mcp"),
+        "Initialize response missing serverInfo name"
+    );
 
     // 2. Send tools/list request
     let list_request = r#"{"jsonrpc":"2.0","method":"tools/list","id":2}"#;
     writeln!(stdin, "{list_request}").expect("Failed to write tools/list request");
 
     let mut list_response = String::new();
-    reader.read_line(&mut list_response).expect("Failed to read tools/list response");
-    assert!(list_response.contains("web_search"), "Response missing web_search");
-    assert!(list_response.contains("web_fetch"), "Response missing web_fetch");
+    reader
+        .read_line(&mut list_response)
+        .expect("Failed to read tools/list response");
+    assert!(
+        list_response.contains("web_search"),
+        "Response missing web_search"
+    );
+    assert!(
+        list_response.contains("web_fetch"),
+        "Response missing web_fetch"
+    );
 
     let _ = child.kill();
     let _ = child.wait();
@@ -93,11 +120,18 @@ fn test_mcp_invalid_tool_error() {
     writeln!(stdin, "{invalid_tool_req}").expect("Failed to write invalid tool call");
 
     let mut response = String::new();
-    reader.read_line(&mut response).expect("Failed to read invalid tool response");
-    assert!(response.contains("isError"), "Response missing isError field");
-    assert!(response.contains("Unknown tool: 'nonexistent_tool'"), "Response missing unknown tool error text");
+    reader
+        .read_line(&mut response)
+        .expect("Failed to read invalid tool response");
+    assert!(
+        response.contains("isError"),
+        "Response missing isError field"
+    );
+    assert!(
+        response.contains("Unknown tool: 'nonexistent_tool'"),
+        "Response missing unknown tool error text"
+    );
 
     let _ = child.kill();
     let _ = child.wait();
 }
-

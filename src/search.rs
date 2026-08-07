@@ -1,8 +1,8 @@
 use crate::cache::TtlCache;
 use crate::user_agent::user_agent;
 use serde::Deserialize;
-use std::time::Duration;
 use serde::Serialize;
+use std::time::Duration;
 use thiserror::Error;
 
 pub type SearchCache = TtlCache<Vec<SearchResult>>;
@@ -51,7 +51,10 @@ struct BingItem {
 }
 
 pub trait SearchProvider: Send + Sync {
-    fn search(&self, query: &str) -> impl std::future::Future<Output = Result<Vec<SearchResult>, SearchError>> + Send;
+    fn search(
+        &self,
+        query: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<SearchResult>, SearchError>> + Send;
 }
 
 #[derive(Default, Debug, Clone)]
@@ -82,9 +85,15 @@ pub async fn perform_web_search<P: SearchProvider + ?Sized>(
     Ok(results)
 }
 
-async fn fetch_bing_results(client: &reqwest::Client, query: &str) -> Result<Vec<SearchResult>, SearchError> {
-    let url = reqwest::Url::parse_with_params("https://www.bing.com/search", &[("q", query), ("format", "rss")])
-        .map_err(|e| SearchError::RequestFailed(format!("failed to parse search URL: {e}")))?;
+async fn fetch_bing_results(
+    client: &reqwest::Client,
+    query: &str,
+) -> Result<Vec<SearchResult>, SearchError> {
+    let url = reqwest::Url::parse_with_params(
+        "https://www.bing.com/search",
+        &[("q", query), ("format", "rss")],
+    )
+    .map_err(|e| SearchError::RequestFailed(format!("failed to parse search URL: {e}")))?;
     let response = client
         .get(url)
         .header("User-Agent", user_agent())
@@ -107,8 +116,11 @@ async fn fetch_bing_results(client: &reqwest::Client, query: &str) -> Result<Vec
 }
 
 fn parse_bing_rss(xml: &str) -> Result<Vec<SearchResult>, SearchError> {
-    let feed: BingRss = quick_xml::de::from_str(xml)
-        .map_err(|e| SearchError::RequestFailed(format!("parse error: {e} (page layout may have changed or a block page was served)")))?;
+    let feed: BingRss = quick_xml::de::from_str(xml).map_err(|e| {
+        SearchError::RequestFailed(format!(
+            "parse error: {e} (page layout may have changed or a block page was served)"
+        ))
+    })?;
 
     Ok(feed
         .channel

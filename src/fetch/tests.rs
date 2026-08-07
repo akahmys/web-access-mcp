@@ -40,3 +40,11 @@ fn test_html_to_markdown_conversion() {
     assert!(md.contains("Test Article Title"));
     assert!(md.contains("paragraph of the test article"));
 }
+
+#[test]
+fn test_html_to_markdown_fallback() {
+    // Non-article HTML with minimal content that Readability might fail on
+    let html = "<div><span>Simple Non-Article Text</span></div>";
+    let md = html_to_markdown(html).unwrap();
+    assert!(md.contains("Simple Non-Article Text"));
+}

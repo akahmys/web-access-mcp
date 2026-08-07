@@ -1,10 +1,10 @@
 use crate::mcp::JsonRpcMessage;
 use anyhow::{Context, Result};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::io::{stdin, stdout};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 /// A transport layer for MCP communication over standard I/O.
-/// 
+///
 /// `StdioTransport` reads JSON-RPC messages from `stdin` and writes
 /// them to `stdout`, following the MCP protocol requirements.
 pub struct StdioTransport {
@@ -13,7 +13,7 @@ pub struct StdioTransport {
 }
 
 impl StdioTransport {
-/// Creates a new `StdioTransport` using standard input and output.
+    /// Creates a new `StdioTransport` using standard input and output.
     pub fn new() -> Self {
         Self {
             reader: BufReader::new(stdin()),
@@ -22,20 +22,23 @@ impl StdioTransport {
     }
 
     /// Reads the next `JsonRpcMessage` from `stdin`.
-    /// 
+    ///
     /// Returns `Ok(None)` when `stdin` is closed.
     pub async fn read_message(&mut self) -> Result<Option<JsonRpcMessage>> {
         let mut line = String::new();
-        let bytes_read = self.reader.read_line(&mut line).await
+        let bytes_read = self
+            .reader
+            .read_line(&mut line)
+            .await
             .context("Failed to read line from stdin")?;
 
         if bytes_read == 0 {
             return Ok(None);
         }
 
-        let message: JsonRpcMessage = serde_json::from_str(&line)
-            .context("Failed to parse JSON-RPC message")?;
-        
+        let message: JsonRpcMessage =
+            serde_json::from_str(&line).context("Failed to parse JSON-RPC message")?;
+
         Ok(Some(message))
     }
 
@@ -43,9 +46,13 @@ impl StdioTransport {
     pub async fn write_message(&mut self, message: &JsonRpcMessage) -> Result<()> {
         let mut payload = serde_json::to_vec(message)?;
         payload.push(b'\n');
-        self.writer.write_all(&payload).await
+        self.writer
+            .write_all(&payload)
+            .await
             .context("Failed to write message to stdout")?;
-        self.writer.flush().await
+        self.writer
+            .flush()
+            .await
             .context("Failed to flush stdout")?;
         Ok(())
     }

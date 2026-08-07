@@ -76,6 +76,18 @@ Identified via a 2026-07-28 review of "what does this MCP still need as a web-ac
 
 ## 🚀 Short-Term Plan
 
+*   **[✅] AWU 8.1: Comprehensive System Architecture Refactoring**
+    *   **Objective**: Execute 6 core architecture improvements: (1) Explicit Chromium page teardown (`page.close().await`) to prevent target leaks, (2) Readability fallback to noise-stripped HTML body Markdown conversion, (3) Bounded capacity enforcement on `TtlCache`, (4) Semaphore-bounded page creation concurrency in `BrowserState`, (5) User-Agent rotation per browser launch, and (6) System guidance in MCP `handle_initialize` `instructions`.
+    *   **Scope**: `src/fetch.rs`, `src/fetch/navigate.rs`, `src/fetch/tests.rs`, `src/cache.rs`, `src/cache/tests.rs`, `src/user_agent.rs`, `src/browser.rs`, `src/context.rs`, `src/main.rs`.
+    *   **DoD**: All 6 architectural improvements implemented cleanly; all unit and integration tests compile and pass with 0 errors/warnings (`cargo test`, `cargo clippy --all-targets -- -D warnings`).
+    *   **Result**: Implemented all 6 architectural improvements: (1) Added `page.close().await` teardown in `fetch_url_uncached` (`src/fetch.rs`) to prevent target/tab memory leaks; (2) Added fallback path in `html_to_markdown` (`src/fetch.rs`) to convert raw HTML directly when Readability parse fails; (3) Added `max_capacity: 500` enforcement in `TtlCache` (`src/cache.rs`); (4) Added 5-permit `Semaphore` concurrency limiting in `BrowserState::new_page` (`src/browser.rs`); (5) Added `random_user_agent()` per browser launch in `src/user_agent.rs`; and (6) Added tool usage `instructions` to MCP `handle_initialize` (`src/main.rs`). All 19 unit tests and 3 integration tests passed cleanly; `cargo clippy --all-targets -- -D warnings` passed with 0 errors/warnings.
+
+*   **[✅] AWU 7.3: Fix Compilation Error & Documentation Discrepancies**
+    *   **Objective**: (1) Fix `Duration::from_hours`/`from_mins` compile error in `src/main.rs`, (2) Update `README.md` to accurately describe `web_fetch` output format (JSON object with `title` and `content`), and (3) Document per-item content limits (2,500 characters) for `smart_search` and `batch_fetch` in `README.md`.
+    *   **Scope**: `src/main.rs`, `README.md`, `PLANS.md`.
+    *   **DoD**: `cargo check`, `cargo test`, and `cargo clippy --all-targets -- -D warnings` compile and pass with 0 errors/warnings; `README.md` accurately describes output formats and content limits.
+    *   **Result**: Fixed standard `Duration` initialization in `src/main.rs` using explicit minute calculations (`Duration::from_secs(60 * 60)` and `Duration::from_secs(10 * 60)`). Updated `README.md` tool section to specify that `web_fetch` returns a JSON object `{"title": "...", "content": "..."}` rather than plain text, and added explicit 2,500-character per-item truncation limits for `smart_search` and `batch_fetch`. `cargo test` (17 unit + 3 integration tests) and `cargo clippy --all-targets -- -D warnings` compiled and passed cleanly with 0 errors/warnings.
+
 *   **[✅] AWU 7.2: Architectural Hardening & Pluggable SearchProvider**
     *   **Objective**: Enhance system resilience and architecture: (1) Enforce a 10MB download size cap on HTTP/PDF fetches to prevent OOM attacks, (2) Add self-healing browser recovery when Chromium CDP connection dies, (3) Add background/active eviction (`evict_expired`) for `TtlCache`, and (4) Abstract search into a unified `SearchProvider` trait for flexible search engine switching.
     *   **Scope**: `src/search.rs`, `src/browser.rs`, `src/cache.rs`, `src/fetch/pdf.rs`, `src/fetch/fast_path.rs`, `src/context.rs`.
@@ -86,6 +98,24 @@ Identified via a 2026-07-28 review of "what does this MCP still need as a web-ac
         4. PDF and HTTP downloads cap body reads at 10MB limit.
         5. `cargo test` and `cargo clippy --all-targets -- -D warnings` pass clean with 0 warnings.
     *   **Result**: Defined `SearchProvider` trait in `src/search.rs` and implemented `BingSearchProvider`, registering it in `AppContext` so any search engine can be swapped seamlessly. Added self-healing recovery in `BrowserState::new_page` (`src/browser.rs`) to auto-restart Chromium if CDP page creation fails. Added `evict_expired()` to `TtlCache` (`src/cache.rs`) and `evict_expired_caches()` to `AppContext`, wired to pings/messages in `main.rs` to prevent long-term memory growth. Enforced a 10MB `MAX_DOWNLOAD_SIZE` limit in `src/fetch/pdf.rs` and `src/fetch/fast_path.rs` for PDF and GitHub raw fetches to protect against OOM memory exhaustion. Added unit test `test_ttl_cache_evict_expired` in `src/cache/tests.rs`. All 17 unit tests and 3 integration tests passed cleanly; `cargo clippy --all-targets -- -D warnings` passed with 0 warnings.
+
+*   **[✅] AWU 5.13: Configure Betterleaks Pre-Commit Hook & Add "Jun Kato" Rule**
+    *   **Objective**: Transition pre-commit hook to `betterleaks`, remove custom `check_secrets.sh` script and `.githooks` directory, and add rule to detect personal name "Jun Kato".
+    *   **Scope**: `.betterleaks.toml`, `.git/hooks/pre-commit`, `.github/workflows/ci.yml`, `README.md`, `check_secrets.sh` (deleted), `.githooks/` (deleted).
+    *   **DoD**: Custom scripts deleted; pre-commit hook uses `betterleaks`; personal name "Jun Kato" rule configured in `.betterleaks.toml`; verified leak detection and clean scan.
+    *   **Result**: Removed `scripts/check_secrets.sh` and `.githooks/`. Configured `.git/hooks/pre-commit` to stream staged diffs into `betterleaks stdin`. Added `personal-name-jun-kato` rule to `.betterleaks.toml`. Verified that staging "Jun Kato" or "jun kato" is detected and blocked by the pre-commit hook, while the workspace passes clean scans.
+
+*   **[✅] AWU 5.12: Migrate Secret Check to `betterleaks`**
+    *   **Objective**: Replace hand-written bash grep secret/path regexes in `scripts/check_secrets.sh` with `betterleaks` scanning engine and `.betterleaks.toml` configuration.
+    *   **Scope**: `.betterleaks.toml` (new), `scripts/check_secrets.sh`.
+    *   **DoD**: `.betterleaks.toml` rules configured for absolute path and secret detection; `scripts/check_secrets.sh` delegates staged and full-repo scans to `betterleaks`; verified execution with `--all` and staged diffs.
+    *   **Result**: Created `.betterleaks.toml` defining custom absolute path rules (`/Users/`, `/home/`) with allowlists for markdown/tests/agent rules. Refactored `scripts/check_secrets.sh` to execute `betterleaks git` for full scans and `betterleaks stdin` for staged diffs. Verified both `--all` mode and staged diff scans pass cleanly.
+
+*   **[✅] AWU 5.11: Migrate License Check to `cargo-deny`**
+    *   **Objective**: Replace custom Python parser logic in `scripts/check_licenses.py` with `cargo-deny` configuration and invocation, and integrate license checking into CI.
+    *   **Scope**: `deny.toml` (new), `scripts/check_licenses.py`, `.github/workflows/ci.yml`.
+    *   **DoD**: `deny.toml` configured with allowed license whitelist; `scripts/check_licenses.py` delegates execution to `cargo deny check licenses`; CI includes a `license-scan` job using `EmbarkStudios/cargo-deny-action@v2`.
+    *   **Result**: Created `deny.toml` with allowed license list matching existing policy. Updated `scripts/check_licenses.py` to invoke `cargo-deny`. Added `license-scan` job to `ci.yml`. Verified execution locally via `python3 scripts/check_licenses.py` and confirmed `cargo test` passes.
 
 *   **[✅] AWU 7.1: Comprehensive Codebase Refactoring & Quality Hardening**
     *   **Objective**: Comprehensive refactoring across architecture, data structures, data operations, error handling, and potential logical bugs (e.g. UTF-8 slice panic risk in `truncate_content`, redundant `BrowserState` dependencies in search, argument extraction boilerplate in handlers, and `AppContext` encapsulation).

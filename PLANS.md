@@ -76,6 +76,12 @@ Identified via a 2026-07-28 review of "what does this MCP still need as a web-ac
 
 ## 🚀 Short-Term Plan
 
+*   **[✅] AWU 8.2: Fix GitHub Actions `secret-scan` CI Job Failure**
+    *   **Objective**: Fix `betterleaks` installation command in `.github/workflows/ci.yml`. The Go module path `github.com/betterleaks/betterleaks/v1` failed with "does not contain package" and resulted in exit code 127 (`command not found`). Correct module path to `github.com/betterleaks/betterleaks@latest` and ensure Go binary path (`$(go env GOPATH)/bin`) is added to `PATH`.
+    *   **Scope**: `.github/workflows/ci.yml`, `PLANS.md`.
+    *   **DoD**: GitHub CI `secret-scan` job installs `betterleaks` successfully and passes.
+    *   **Result**: Fixed `.github/workflows/ci.yml` by adding `actions/setup-go@v5` step and correcting the `go install` module path from `github.com/betterleaks/betterleaks/v1@latest` to `github.com/betterleaks/betterleaks@latest`. Verified `cargo test` (19 unit + 3 integration tests) pass cleanly.
+
 *   **[✅] AWU 8.1: Comprehensive System Architecture Refactoring**
     *   **Objective**: Execute 6 core architecture improvements: (1) Explicit Chromium page teardown (`page.close().await`) to prevent target leaks, (2) Readability fallback to noise-stripped HTML body Markdown conversion, (3) Bounded capacity enforcement on `TtlCache`, (4) Semaphore-bounded page creation concurrency in `BrowserState`, (5) User-Agent rotation per browser launch, and (6) System guidance in MCP `handle_initialize` `instructions`.
     *   **Scope**: `src/fetch.rs`, `src/fetch/navigate.rs`, `src/fetch/tests.rs`, `src/cache.rs`, `src/cache/tests.rs`, `src/user_agent.rs`, `src/browser.rs`, `src/context.rs`, `src/main.rs`.
